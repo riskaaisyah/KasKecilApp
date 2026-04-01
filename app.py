@@ -1,97 +1,101 @@
 import streamlit as st
 import pandas as pd
+from st_supabase_connection import SupabaseConnection
 from io import BytesIO
 from openpyxl import Workbook
 import datetime
 
-# --- CONFIG ---
 st.set_page_config(page_title="Aplikasi Kas Kecil", layout="centered")
-st.title("💰 Aplikasi Kas Kecil (Final Stable)")
+st.title("💰 Aplikasi Kas Kecil")
 
-# ID Sheet kamu
-ID_SHEET = "1PoUMSVIEA_dDotKXjt6c--_93jLq9uV5jf9WmaL4wxk"
-# Link khusus untuk kirim data via Pandas
-URL_DATA = f"https://docs.google.com/spreadsheets/d/{ID_SHEET}/gviz/tq?tqx=out:csv"
+# --- KONEKSI SUPABASE ---
+# Pastikan URL dan Key sudah diisi di Secrets Streamlit Cloud
+conn = st.connection("supabase", type=SupabaseConnection)
 
 # --- FUNGSI AMBIL DATA ---
 def fetch_data():
     try:
-        # Membaca data langsung tanpa library connection yang ribet
-        df = pd.read_csv(URL_DATA)
+        # Mengambil data dari tabel 'kas_kecil'
+        res = conn.table("kas_kecil").select("*").execute()
+        df = pd.DataFrame(res.data)
         if df.empty:
-            return pd.DataFrame(columns=["No","Uraian","Vendor","Tanggal","Jumlah"])
-        df['Tanggal'] = pd.to_datetime(df['Tanggal'], errors='coerce')
-        return df
-    except:
-        return pd.DataFrame(columns=["No","Uraian","Vendor","Tanggal","Jumlah"])
+            return pd.DataFrame(columns=["id", "uraian", "vendor", "tanggal", "jumlah"])
+        # Urutkan berdasarkan ID (waktu input)
+        return df.sort_values("id")
+    except Exception as e:
+        st.error(f"Gagal mengambil data: {e}")
+        return pd.DataFrame(columns=["id", "uraian", "vendor", "tanggal", "jumlah"])
 
-df_gsheets = fetch_data()
+df_raw = fetch_data()
 
 # --- FORM INPUT ---
 with st.form("form_kas", clear_on_submit=True):
-    st.subheader("Input Data Baru")
-    opsi_uraian = ["Jamuan Makan Dinas", "Kebutuhan Kantor", "Karcis Parkir Kendaraan Operasional", "Isi BBM Kendaraan Operasional"]
+    st.subheader("Input Data Transaksi")
+    opsi_uraian = [
+        "Jamuan Makan Dinas",
+        "Kebutuhan Kantor",
+        "Karcis Parkir Kendaraan Operasional",
+        "Isi BBM Kendaraan Operasional"
+    ]
+    
     uraian_pilih = st.selectbox("Uraian", opsi_uraian)
     vendor = st.text_input("Nama Vendor")
     tanggal_input = st.date_input("Tanggal", value=datetime.date.today())
-    jumlah = st.number_input("Jumlah", min_value=0, step=1000, value=None, placeholder="Masukkan angka...")
-    submit = st.form_submit_button("Simpan Data 🚀")
+    jumlah = st.number_input("Jumlah (Nominal)", min_value=0, step=1000)
+    
+    submit = st.form_submit_button("Simpan ke Cloud 🚀")
 
-# --- LOGIKA SIMPAN (MENGGUNAKAN LIBRARY CONNECTION) ---
 if submit:
-    if jumlah is None or vendor == "":
-        st.error("Gagal: Nama Vendor dan Jumlah wajib diisi!")
+    if vendor and jumlah:
+        # Simpan data asli ke Supabase
+        data_to_insert = {
+            "uraian": uraian_pilih,
+            "vendor": vendor,
+            "tanggal": str(tanggal_input),
+            "jumlah": jumlah
+        }
+        try:
+            conn.table("kas_kecil").insert(data_to_insert).execute()
+            st.success("Data Berhasil Tersimpan!")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Gagal Simpan: {e}")
     else:
-        try:
-            from streamlit_gsheets import GSheetsConnection
-            conn = st.connection("gsheets", type=GSheetsConnection)
-            
-            # Ambil data terbaru untuk nomor urut
-            db_now = fetch_data()
-            no_baru = len(db_now) + 1
-            
-            new_row = pd.DataFrame({
-                "No": [no_baru],
-                "Uraian": [f"{no_baru} {uraian_pilih}"],
-                "Vendor": [vendor],
-                "Tanggal": [tanggal_input.strftime('%Y-%m-%d')],
-                "Jumlah": [jumlah]
-            })
-            
-            updated_db = pd.concat([db_now, new_row], ignore_index=True)
-            updated_db['Tanggal'] = updated_db['Tanggal'].astype(str)
-            
-            # KIRIM DATA (Pastikan Secrets di Streamlit Cloud sudah benar)
-            # URL harus pakai versi /edit
-            clean_url = f"https://docs.google.com/spreadsheets/d/{ID_SHEET}/edit?usp=sharing"
-            conn.update(spreadsheet=clean_url, data=updated_db)
-            
-            st.success("Data Berhasil Tersimpan Permanen!")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Error: {e}")
-            st.info("Coba cek apakah link di Secrets sudah sama persis dengan link GSheets kamu.")
+        st.warning("Mohon isi Vendor dan Jumlah!")
 
-# --- TAMPILAN EDIT DATA (DATA EDITOR) ---
+# --- REKAPITULASI (Tampilan Persis Awal) ---
 st.divider()
-st.subheader("Edit Data")
+st.subheader("📋 Rekapitulasi Kas")
 
-if not df_gsheets.empty:
-    df_display = df_gsheets.copy()
-    # Pastikan tampilan tanggal cantik
-    df_display['Tanggal'] = pd.to_datetime(df_display['Tanggal']).dt.strftime('%Y-%m-%d')
+if not df_raw.empty:
+    # 1. Tambahkan No Urut (1, 2, 3...)
+    df_raw['No'] = range(1, len(df_raw) + 1)
     
-    # Biarkan user edit tabelnya
-    edited_df = st.data_editor(df_display[["No", "Uraian", "Vendor", "Tanggal", "Jumlah"]], 
-                               num_rows="dynamic", use_container_width=True)
+    # 2. Gabungkan No + Uraian (Hasil: "1 Jamuan Makan Dinas")
+    df_raw['Uraian_Tampil'] = df_raw.apply(lambda x: f"{x['No']} {x['uraian']}", axis=1)
     
-    # Tombol Update jika ada perubahan di tabel
-    if st.button("Simpan Perubahan Tabel"):
-        try:
-            from streamlit_gsheets import GSheetsConnection
-            conn = st.connection("gsheets", type=GSheetsConnection)
-            conn.update(spreadsheet=f"https://docs.google.com/spreadsheets/d/{ID_SHEET}/edit?usp=sharing", data=edited_df)
-            st.success("Tabel Berhasil Diupdate!")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Gagal Update Tabel: {e}")
+    # 3. Filter kolom untuk tampilan tabel
+    df_display = df_raw[['No', 'Uraian_Tampil', 'vendor', 'tanggal', 'jumlah']].copy()
+    df_display.columns = ['No', 'Uraian', 'Vendor', 'Tanggal', 'Jumlah']
+    
+    # Ambil Nama Bulan dari data terakhir untuk judul grup
+    last_date = pd.to_datetime(df_raw['tanggal'].iloc[-1])
+    nama_bulan = last_date.strftime('%B').upper()
+    
+    with st.expander(f"Data {nama_bulan} 1", expanded=True):
+        # Tabel Editor (Sama persis tampilannya)
+        st.data_editor(df_display, use_container_width=True, num_rows="dynamic")
+
+# --- DOWNLOAD EXCEL ---
+if st.sidebar.button("💾 Siapkan Excel"):
+    wb = Workbook()
+    ws = wb.active
+    # Header Excel
+    ws.append(["No", "Uraian", "Vendor", "Tanggal", "Jumlah"])
+    # Isi Data
+    for r in df_display.values:
+        ws.append(list(r))
+    
+    buf = BytesIO()
+    wb.save(buf)
+    st.sidebar.download_button("⬇️ Download Sekarang", buf.getvalue(), "Rekap_Kas.xlsx")
