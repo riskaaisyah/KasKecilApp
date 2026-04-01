@@ -4,3 +4,4 @@ opencv-python
 pandas
 openpyxl
 pillow
+st-gsheets-connection
