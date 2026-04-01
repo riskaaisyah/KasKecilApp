@@ -2,142 +2,96 @@ import streamlit as st
 import pandas as pd
 from io import BytesIO
 from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment, Border, Side
-from openpyxl.utils.dataframe import dataframe_to_rows
 import datetime
-from streamlit_gsheets import GSheetsConnection
 
+# --- CONFIG ---
 st.set_page_config(page_title="Aplikasi Kas Kecil", layout="centered")
-st.title("💰 Aplikasi Kas Kecil")
+st.title("💰 Aplikasi Kas Kecil (Final Stable)")
 
-LIMIT_KAS = 25_000_000
+# ID Sheet kamu
 ID_SHEET = "1PoUMSVIEA_dDotKXjt6c--_93jLq9uV5jf9WmaL4wxk"
-URL_SHEETS = f"https://docs.google.com/spreadsheets/d/{ID_SHEET}"
+# Link khusus untuk kirim data via Pandas
+URL_DATA = f"https://docs.google.com/spreadsheets/d/{ID_SHEET}/gviz/tq?tqx=out:csv"
 
-# ========================
-# KONEKSI & AMBIL DATA
-# ========================
-conn = st.connection("gsheets", type=GSheetsConnection)
-
+# --- FUNGSI AMBIL DATA ---
 def fetch_data():
     try:
-        # Mengambil data terbaru dari GSheets
-        df = conn.read(spreadsheet=URL_SHEETS, worksheet="Sheet1", ttl=0)
-        if df is None or df.empty:
+        # Membaca data langsung tanpa library connection yang ribet
+        df = pd.read_csv(URL_DATA)
+        if df.empty:
             return pd.DataFrame(columns=["No","Uraian","Vendor","Tanggal","Jumlah"])
-        # Pastikan format tanggal dan angka benar
-        df['Tanggal'] = pd.to_datetime(df['Tanggal']).dt.date
-        df['Jumlah'] = pd.to_numeric(df['Jumlah'], errors='coerce').fillna(0).astype(int)
+        df['Tanggal'] = pd.to_datetime(df['Tanggal'], errors='coerce')
         return df
     except:
         return pd.DataFrame(columns=["No","Uraian","Vendor","Tanggal","Jumlah"])
 
 df_gsheets = fetch_data()
 
-# ========================
-# FORM INPUT
-# ========================
+# --- FORM INPUT ---
 with st.form("form_kas", clear_on_submit=True):
     st.subheader("Input Data Baru")
     opsi_uraian = ["Jamuan Makan Dinas", "Kebutuhan Kantor", "Karcis Parkir Kendaraan Operasional", "Isi BBM Kendaraan Operasional"]
-    
     uraian_pilih = st.selectbox("Uraian", opsi_uraian)
     vendor = st.text_input("Nama Vendor")
     tanggal_input = st.date_input("Tanggal", value=datetime.date.today())
     jumlah = st.number_input("Jumlah", min_value=0, step=1000, value=None, placeholder="Masukkan angka...")
+    submit = st.form_submit_button("Simpan Data 🚀")
 
-    if jumlah:
-        st.info(f"**Konfirmasi:** Rp {jumlah:,.0f}".replace(",", "."))
-    
-    submit = st.form_submit_button("Tambah ke Tabel")
-
-# ========================
-# LOGIKA INSERT
-# ========================
+# --- LOGIKA SIMPAN (MENGGUNAKAN LIBRARY CONNECTION) ---
 if submit:
     if jumlah is None or vendor == "":
         st.error("Gagal: Nama Vendor dan Jumlah wajib diisi!")
     else:
-        # Tambahkan data baru
-        no_baru = len(df_gsheets) + 1
-        new_row = pd.DataFrame({
-            "No": [no_baru],
-            "Uraian": [f"{no_baru} {uraian_pilih}"],
-            "Vendor": [vendor],
-            "Tanggal": [tanggal_input],
-            "Jumlah": [jumlah]
-        })
-        
-        updated_db = pd.concat([df_gsheets, new_row], ignore_index=True)
-        # Update permanen ke GSheets
-        conn.update(spreadsheet=URL_SHEETS, data=updated_db)
-        st.success("Data Tersimpan!")
-        st.rerun()
+        try:
+            from streamlit_gsheets import GSheetsConnection
+            conn = st.connection("gsheets", type=GSheetsConnection)
+            
+            # Ambil data terbaru untuk nomor urut
+            db_now = fetch_data()
+            no_baru = len(db_now) + 1
+            
+            new_row = pd.DataFrame({
+                "No": [no_baru],
+                "Uraian": [f"{no_baru} {uraian_pilih}"],
+                "Vendor": [vendor],
+                "Tanggal": [tanggal_input.strftime('%Y-%m-%d')],
+                "Jumlah": [jumlah]
+            })
+            
+            updated_db = pd.concat([db_now, new_row], ignore_index=True)
+            updated_db['Tanggal'] = updated_db['Tanggal'].astype(str)
+            
+            # KIRIM DATA (Pastikan Secrets di Streamlit Cloud sudah benar)
+            # URL harus pakai versi /edit
+            clean_url = f"https://docs.google.com/spreadsheets/d/{ID_SHEET}/edit?usp=sharing"
+            conn.update(spreadsheet=clean_url, data=updated_db)
+            
+            st.success("Data Berhasil Tersimpan Permanen!")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Error: {e}")
+            st.info("Coba cek apakah link di Secrets sudah sama persis dengan link GSheets kamu.")
 
-# ========================
-# EDIT DATA (Bagian yang kamu mau)
-# ========================
+# --- TAMPILAN EDIT DATA (DATA EDITOR) ---
 st.divider()
 st.subheader("Edit Data")
 
 if not df_gsheets.empty:
-    # Mapping Nama Bulan Bahasa Indonesia
-    nama_bulan = {1: "JANUARI", 2: "FEBRUARI", 3: "MARET", 4: "APRIL", 5: "MEI", 6: "JUNI",
-                  7: "JULI", 8: "AGUSTUS", 9: "SEPTEMBER", 10: "OKTOBER", 11: "NOVEMBER", 12: "DESEMBER"}
+    df_display = df_gsheets.copy()
+    # Pastikan tampilan tanggal cantik
+    df_display['Tanggal'] = pd.to_datetime(df_display['Tanggal']).dt.strftime('%Y-%m-%d')
     
-    # Buat kolom bantu untuk grouping (berdasarkan tanggal di GSheets)
-    df_gsheets_dt = df_gsheets.copy()
-    df_gsheets_dt['Bulan'] = pd.to_datetime(df_gsheets_dt['Tanggal']).dt.month.map(nama_bulan)
-    df_gsheets_dt['Tahun'] = pd.to_datetime(df_gsheets_dt['Tanggal']).dt.year
+    # Biarkan user edit tabelnya
+    edited_df = st.data_editor(df_display[["No", "Uraian", "Vendor", "Tanggal", "Jumlah"]], 
+                               num_rows="dynamic", use_container_width=True)
     
-    # Ambil periode yang tersedia
-    periodes = df_gsheets_dt[['Bulan', 'Tahun']].drop_duplicates().sort_values(['Tahun', 'Bulan'], ascending=False)
-
-    for _, row in periodes.iterrows():
-        bln, thn = row['Bulan'], row['Tahun']
-        label_tabel = f"{bln} 1" # Sesuai format digambar kamu: "JANUARI 1"
-        
-        # Filter data untuk periode ini
-        df_periode = df_gsheets_dt[(df_gsheets_dt['Bulan'] == bln) & (df_gsheets_dt['Tahun'] == thn)].copy()
-        
-        st.write(f"### {label_tabel}")
-        
-        # Tampilkan Tabel yang Bisa Diedit (Data Editor)
-        edited_df = st.data_editor(
-            df_periode[["No", "Uraian", "Vendor", "Tanggal", "Jumlah"]],
-            num_rows="dynamic",
-            key=f"editor_{bln}_{thn}",
-            use_container_width=True
-        )
-
-        # Jika ada perubahan di tabel editor
-        if not edited_df.equals(df_periode[["No", "Uraian", "Vendor", "Tanggal", "Jumlah"]]):
-            # Gabungkan kembali dengan data utama
-            # (Ganti data lama di periode ini dengan data hasil editan)
-            other_data = df_gsheets_dt[~((df_gsheets_dt['Bulan'] == bln) & (df_gsheets_dt['Tahun'] == thn))]
-            final_db = pd.concat([other_data, edited_df], ignore_index=True)
-            
-            # Bersihkan kolom bantu sebelum upload
-            final_db = final_db[["No", "Uraian", "Vendor", "Tanggal", "Jumlah"]]
-            
-            # Simpan Perubahan ke Google Sheets
-            conn.update(spreadsheet=URL_SHEETS, data=final_db)
-            st.success(f"Perubahan di {label_tabel} tersimpan!")
+    # Tombol Update jika ada perubahan di tabel
+    if st.button("Simpan Perubahan Tabel"):
+        try:
+            from streamlit_gsheets import GSheetsConnection
+            conn = st.connection("gsheets", type=GSheetsConnection)
+            conn.update(spreadsheet=f"https://docs.google.com/spreadsheets/d/{ID_SHEET}/edit?usp=sharing", data=edited_df)
+            st.success("Tabel Berhasil Diupdate!")
             st.rerun()
-
-# ========================
-# EXPORT EXCEL
-# ========================
-def to_excel(df):
-    wb = Workbook()
-    wb.remove(wb.active)
-    ws = wb.create_sheet(title="Rekap Kas")
-    for r in dataframe_to_rows(df, index=False, header=True):
-        ws.append(r)
-    buf = BytesIO(); wb.save(buf)
-    return buf.getvalue()
-
-st.sidebar.divider()
-if st.sidebar.button("Download Excel"):
-    file_ex = to_excel(df_gsheets)
-    st.sidebar.download_button("Klik Download", file_ex, "Kas_Kecil.xlsx")
+        except Exception as e:
+            st.error(f"Gagal Update Tabel: {e}")
