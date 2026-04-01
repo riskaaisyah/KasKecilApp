@@ -68,11 +68,18 @@ if submit:
 st.divider()
 st.subheader("📋 Rekapitulasi Kas")
 
+# Panggil data terbaru dulu
+df_raw = fetch_data()
+
 if not df_raw.empty:
-    # 1. Pastikan kolom tanggal benar-benar format tanggal
-    df_raw['tanggal_dt'] = pd.to_datetime(df_raw['tanggal'])
+    # 1. Konversi tanggal dengan lebih aman
+    # Kita paksa (coerce) kalau ada format yang salah jadi 'NaT' agar tidak error
+    df_raw['tanggal_dt'] = pd.to_datetime(df_raw['tanggal'], errors='coerce')
     
-    # 2. Buat kolom bantu Nama Bulan & Tahun (Bahasa Indonesia)
+    # Hapus data yang tanggalnya gagal terbaca (biar tidak merusak sistem)
+    df_raw = df_raw.dropna(subset=['tanggal_dt'])
+    
+    # 2. Mapping Nama Bulan
     nama_bulan_id = {
         1: "JANUARI", 2: "FEBRUARI", 3: "MARET", 4: "APRIL", 5: "MEI", 6: "JUNI",
         7: "JULI", 8: "AGUSTUS", 9: "SEPTEMBER", 10: "OKTOBER", 11: "NOVEMBER", 12: "DESEMBER"
@@ -80,37 +87,40 @@ if not df_raw.empty:
     df_raw['Bulan_Nama'] = df_raw['tanggal_dt'].dt.month.map(nama_bulan_id)
     df_raw['Tahun'] = df_raw['tanggal_dt'].dt.year
     
-    # 3. Ambil daftar Periode yang unik (misal: April 2026, Januari 2026)
-    # Diurutkan dari yang terbaru (Descending)
-    list_periode = df_raw[['Bulan_Nama', 'Tahun', 'tanggal_dt']].drop_duplicates(subset=['Bulan_Nama', 'Tahun'])
-    list_periode = list_periode.sort_values('tanggal_dt', ascending=False)
+    # 3. Ambil daftar periode unik (Januari 2026, April 2026, dst)
+    # Kita urutkan berdasarkan tanggal asli biar yang terbaru di atas
+    list_periode = df_raw.sort_values('tanggal_dt', ascending=False)[['Bulan_Nama', 'Tahun']].drop_duplicates()
 
-    # 4. LOOPING: Buat kotak expander untuk SETIAP periode
+    # 4. LOOPING TAMPILAN
     for _, row in list_periode.iterrows():
         bln = row['Bulan_Nama']
         thn = row['Tahun']
         
-        # Filter data khusus bulan & tahun ini
-        df_periode = df_raw[(df_raw['Bulan_Nama'] == bln) & (df_raw['Tahun'] == thn)].copy()
+        # Filter data per bulan
+        mask = (df_raw['Bulan_Nama'] == bln) & (df_raw['Tahun'] == thn)
+        df_periode = df_raw[mask].copy()
         
-        # Hitung total per bulan (biar informatif)
+        # Hitung total
         total_bulan = df_periode['jumlah'].sum()
         
         with st.expander(f"📂 Data {bln} {thn} (Total: Rp {total_bulan:,.0f})".replace(",", "."), expanded=True):
-            # Penomoran ulang di dalam bulan tersebut
+            # No Urut & Uraian Gabungan
+            df_periode = df_periode.sort_values('id') # Urutkan berdasarkan waktu input
             df_periode['No'] = range(1, len(df_periode) + 1)
             df_periode['Uraian_Tampil'] = df_periode.apply(lambda x: f"{x['No']} {x['uraian']}", axis=1)
             
-            # Rapikan tabel untuk tampilan
+            # Pilih kolom yang mau ditampilkan
             df_display = df_periode[['No', 'Uraian_Tampil', 'vendor', 'tanggal', 'jumlah']].copy()
             df_display.columns = ['No', 'Uraian', 'Vendor', 'Tanggal', 'Jumlah']
             
-            # Format tampilan ribuan di kolom jumlah (biar enak dilihat)
-            df_display_style = df_display.copy()
-            df_display_style['Jumlah'] = df_display_style['Jumlah'].apply(lambda x: f"{x:,.0f}".replace(",", "."))
+            # Beri titik ribuan hanya untuk tampilan (String)
+            df_style = df_display.copy()
+            df_style['Jumlah'] = df_style['Jumlah'].apply(lambda x: f"{x:,.0f}".replace(",", "."))
             
-            st.data_editor(df_display_style, use_container_width=True, key=f"editor_{bln}_{thn}")
-
+            st.data_editor(df_style, use_container_width=True, key=f"table_{bln}_{thn}")
+else:
+    st.info("Belum ada data yang tersimpan di Cloud Database.")
+    
 # --- DOWNLOAD EXCEL (SEMUA DATA) ---
 if st.sidebar.button("💾 Siapkan Excel Semua Data"):
     wb = Workbook()
