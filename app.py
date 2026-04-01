@@ -39,20 +39,33 @@ with st.form("form_kas", clear_on_submit=True):
     ]
     
     uraian_pilih = st.selectbox("Uraian", opsi_uraian)
-    vendor = st.text_input("Nama Vendor")
-    tanggal_input = st.date_input("Tanggal", value=datetime.date.today())
-    jumlah = st.number_input("Jumlah (Nominal)", min_value=0, step=1000)
+    vendor = st.text_input("Nama Vendor", placeholder="Contoh: Toko Buku Gramedia")
+    tanggal_input = st.date_input("Tanggal", value=datetime.today().date()) # Pakai .date() agar formatnya rapi
+    
+    # Perubahan di sini: value=None dan placeholder
+    jumlah = st.number_input(
+        "Jumlah (Nominal)", 
+        min_value=0, 
+        step=1000, 
+        value=None, 
+        placeholder="Masukkan angka tanpa titik/koma..."
+    )
+    
+    # Fitur konfirmasi agar tidak salah nol
+    if jumlah:
+        st.info(f"**Konfirmasi Nominal:** Rp {jumlah:,.0f}".replace(",", "."))
     
     submit = st.form_submit_button("Simpan ke Cloud 🚀")
 
+# --- LOGIKA SIMPAN ---
 if submit:
-    if vendor and jumlah:
-        # Simpan data asli ke Supabase
+    # Pastikan jumlah tidak None dan vendor tidak kosong
+    if vendor and jumlah is not None: 
         data_to_insert = {
             "uraian": uraian_pilih,
             "vendor": vendor,
             "tanggal": str(tanggal_input),
-            "jumlah": jumlah
+            "jumlah": int(jumlah) # Pastikan masuk sebagai angka bulat
         }
         try:
             conn.table("kas_kecil").insert(data_to_insert).execute()
@@ -61,7 +74,7 @@ if submit:
         except Exception as e:
             st.error(f"Gagal Simpan: {e}")
     else:
-        st.warning("Mohon isi Vendor dan Jumlah!")
+        st.warning("Mohon isi Nama Vendor dan Jumlah Nominal!")
 
 # --- REKAPITULASI (OTOMATIS PISAH PER BULAN) ---
 st.divider()
