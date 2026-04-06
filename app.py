@@ -48,7 +48,7 @@ with st.form("form_kas", clear_on_submit=True):
     
     submit = st.form_submit_button("Simpan ke Cloud 🚀")
 
-# --- LOGIKA SIMPAN BARU ---
+# --- LOGIKA SIMPAN ---
 if submit:
     if vendor and (jumlah is not None):
         try:
@@ -64,13 +64,23 @@ if submit:
                     if not match.empty:
                         id_old = int(match.iloc[0]['id'])
                         new_amt = int(match.iloc[0]['jumlah'] + jumlah)
+                        # Re-insert agar ID jadi paling baru (paling bawah)
                         conn.table("kas_kecil").delete().eq("id", id_old).execute()
-                        conn.table("kas_kecil").insert({"uraian": target_uraian, "vendor": vendor, "tanggal": str(tanggal_input), "jumlah": new_amt}).execute()
+                        conn.table("kas_kecil").insert({
+                            "uraian": target_uraian, "vendor": vendor, 
+                            "tanggal": str(tanggal_input), "jumlah": new_amt
+                        }).execute()
                         found = True
                 if not found:
-                    conn.table("kas_kecil").insert({"uraian": target_uraian, "vendor": vendor, "tanggal": str(tanggal_input), "jumlah": int(jumlah)}).execute()
+                    conn.table("kas_kecil").insert({
+                        "uraian": target_uraian, "vendor": vendor, 
+                        "tanggal": str(tanggal_input), "jumlah": int(jumlah)
+                    }).execute()
             else:
-                conn.table("kas_kecil").insert({"uraian": uraian_pilih, "vendor": vendor, "tanggal": str(tanggal_input), "jumlah": int(jumlah)}).execute()
+                conn.table("kas_kecil").insert({
+                    "uraian": uraian_pilih, "vendor": vendor, 
+                    "tanggal": str(tanggal_input), "jumlah": int(jumlah)
+                }).execute()
             
             st.success("Berhasil disimpan!")
             time.sleep(1)
@@ -80,7 +90,7 @@ if submit:
 
 # --- REKAPITULASI ---
 st.divider()
-st.subheader("📋 Rekapitulasi Kas (Limit 25jt/Sheet)")
+st.subheader("📋 Rekapitulasi Kas")
 
 df_raw = fetch_data()
 
@@ -91,13 +101,13 @@ if not df_raw.empty:
     nama_bulan_id = {1: "JANUARI", 2: "FEBRUARI", 3: "MARET", 4: "APRIL", 5: "MEI", 6: "JUNI", 
                      7: "JULI", 8: "AGUSTUS", 9: "SEPTEMBER", 10: "OKTOBER", 11: "NOVEMBER", 12: "DESEMBER"}
 
-    # BATCHING LOGIC
+    # LOGIKA BATCHING (PEMISAH 25JT & RESET BULAN)
     df_raw['Kelompok_Sheet'] = "" 
     periods = df_raw[['tanggal_dt']].copy()
     periods['m'], periods['y'] = periods['tanggal_dt'].dt.month, periods['tanggal_dt'].dt.year
-    unique_p = periods[['y', 'm']].drop_duplicates().values
+    unique_periods = periods[['y', 'm']].drop_duplicates().values
 
-    for y, m in unique_p:
+    for y, m in unique_periods:
         if pd.isna(m): continue
         curr_batch, run_total = 1, 0
         mask = (df_raw['tanggal_dt'].dt.year == y) & (df_raw['tanggal_dt'].dt.month == m)
@@ -115,11 +125,22 @@ if not df_raw.empty:
     for g in groups:
         df_g = df_raw[df_raw['Kelompok_Sheet'] == g].copy()
         tot_g = df_g['jumlah'].sum()
-        with st.expander(f"📂 {g} | Total: Rp {tot_g:,.0f} | Sisa: Rp {LIMIT_KAS-tot_g:,.0f}".replace(",", "."), expanded=True):
+        
+        with st.expander(f"📂 {g} | Total: Rp {tot_g:,.0f} | 💰 Sisa: Rp {LIMIT_KAS-tot_g:,.0f}".replace(",", "."), expanded=True):
             
-            # Form untuk edit/hapus agar tidak rerun sembarangan
-            df_for_edit = df_g[['id', 'uraian', 'vendor', 'tanggal_dt', 'jumlah']].copy()
-            df_for_edit.columns = ['id', 'Uraian', 'Vendor', 'Tanggal', 'Jumlah']
+            # --- MODIFIKASI TAMPILAN SESUAI GAMBAR 2 ---
+            df_display = df_g.copy()
+            df_display['No_Urut'] = range(1, len(df_display) + 1)
+            # Uraian dengan nomor (contoh: 1 Jamuan Makan Dinas)
+            df_display['Uraian_View'] = df_display.apply(lambda x: f"{x['No_Urut']} {x['uraian']}", axis=1)
+            # Sembunyikan tanggal jika Karcis Parkir
+            df_display['Tgl_View'] = df_display.apply(
+                lambda x: "" if x['uraian'] == "Karcis Parkir Kendaraan Operasional" else x['tanggal'], axis=1
+            )
+            
+            # Kolom untuk editor
+            df_for_edit = df_display[['id', 'No_Urut', 'Uraian_View', 'vendor', 'Tgl_View', 'jumlah']].copy()
+            df_for_edit.columns = ['id', 'No', 'Uraian', 'Vendor', 'Tanggal', 'Jumlah']
             
             edited_df = st.data_editor(
                 df_for_edit,
@@ -127,44 +148,49 @@ if not df_raw.empty:
                 num_rows="dynamic",
                 use_container_width=True,
                 column_config={
-                    "id": None,
-                    "Uraian": st.column_config.SelectboxColumn("Uraian", options=opsi_uraian),
-                    "Tanggal": st.column_config.DateColumn("Tanggal"),
-                    "Jumlah": st.column_config.NumberColumn("Jumlah", format="%d")
+                    "id": None, # Sembunyikan ID
+                    "No": st.column_config.NumberColumn("No", width="small", disabled=True),
+                    "Uraian": st.column_config.TextColumn("Uraian", width="large"),
+                    "Vendor": "Vendor",
+                    "Tanggal": "Tanggal",
+                    "Jumlah": st.column_config.NumberColumn("Jumlah", format="Rp %d")
                 }
             )
 
             if st.button(f"💾 Simpan Perubahan {g}", key=f"save_{g}"):
-                with st.spinner("Sedang menyelaraskan data..."):
+                with st.spinner("Menyinkronkan data..."):
                     try:
                         ids_old = set(df_for_edit['id'].tolist())
                         ids_new = set(edited_df['id'].dropna().astype(int).tolist())
                         ids_del = ids_old - ids_new
                         
-                        # Jalankan Hapus
+                        # 1. Hapus Baris
                         for d_id in ids_del:
                             conn.table("kas_kecil").delete().eq("id", d_id).execute()
                         
-                        # Jalankan Update
+                        # 2. Update Baris
                         for _, row in edited_df.iterrows():
                             if pd.notna(row['id']):
-                                old_row = df_for_edit[df_for_edit['id'] == row['id']].iloc[0]
-                                if not row.equals(old_row):
-                                    conn.table("kas_kecil").update({
-                                        "uraian": row['Uraian'], "vendor": row['Vendor'],
-                                        "tanggal": str(row['Tanggal']), "jumlah": int(row['Jumlah'])
-                                    }).eq("id", int(row['id'])).execute()
+                                # Bersihkan teks Uraian dari angka di depannya (misal: "1 Jamuan" -> "Jamuan")
+                                u_asli = row['Uraian'].split(' ', 1)[-1] if ' ' in row['Uraian'] else row['Uraian']
+                                
+                                conn.table("kas_kecil").update({
+                                    "uraian": u_asli,
+                                    "vendor": row['Vendor'],
+                                    "tanggal": str(row['Tanggal']),
+                                    "jumlah": int(row['Jumlah'])
+                                }).eq("id", int(row['id'])).execute()
                         
-                        st.success("Data Sinkron!")
+                        st.success("Data berhasil diperbarui!")
                         time.sleep(1)
                         st.rerun()
                     except Exception as e:
                         st.error(f"Gagal Simpan: {e}")
 
 # --- SIDEBAR ---
-st.sidebar.header("⚙️ Menu")
-if not df_raw.empty:
-    if st.sidebar.button("💾 Export to Excel BIOS"):
+st.sidebar.markdown("###  Simpan Rekap Kas Kecil")
+if 'df_raw' in locals() and not df_raw.empty:
+    if st.sidebar.button("💾 Siapkan Excel Format BIOS"):
         wb = Workbook()
         del wb['Sheet']
         for p in df_raw['Kelompok_Sheet'].unique():
@@ -175,16 +201,35 @@ if not df_raw.empty:
             ws['B2'].font = Font(bold=True, color="FFFFFF", size=14)
             ws['B2'].alignment = Alignment(horizontal="center", vertical="center")
             ws['B2'].fill = PatternFill(start_color="CC9900", end_color="CC9900", fill_type="solid")
-            ws.append([]); ws.append(["No", "URAIAN", "NAMA VENDOR", "POS", "GL", "TANGGAL", "JUMLAH", "NET"])
+            
+            ws['A5'] = "PERTANGGUNGJAWABAN ATAS ND PENGAJUAN NOMOR KU.02.04/19/11/1/PBLU/PBLU-25"
+            ws['A5'].font = Font(bold=True)
+            
+            headers = ["No", "URAIAN", "NAMA VENDOR", "POS MATA ANGGARAN", "GL ACCOUNT", "TANGGAL TRANSAKSI", "JUMLAH PENGGUNAAN", "SETELAH PPN"]
+            ws.append([]); ws.append(headers)
+            
+            for cell in ws[7]:
+                cell.fill = PatternFill(start_color="00FFFF", end_color="00FFFF", fill_type="solid")
+                cell.font = Font(bold=True); cell.alignment = Alignment(horizontal="center")
+                cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+
             df_b = df_raw[df_raw['Kelompok_Sheet'] == p]
             for i, r in enumerate(df_b.itertuples(), 1):
-                t = "" if r.uraian == "Karcis Parkir Kendaraan Operasional" else str(r.tanggal)
-                ws.append([i, f"{i} {r.uraian}", r.vendor, "", "", t, r.jumlah, r.jumlah])
+                t_excel = "" if r.uraian == "Karcis Parkir Kendaraan Operasional" else str(r.tanggal)
+                ws.append([i, f"{i} {r.uraian}", r.vendor, "", "", t_excel, r.jumlah, r.jumlah])
+                for cell in ws[ws.max_row]:
+                    cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+                    if isinstance(cell.value, (int, float)): cell.number_format = '#,##0'
+                    
         buf = BytesIO(); wb.save(buf)
         st.sidebar.download_button("⬇️ Download Excel", buf.getvalue(), "Rekap_BIOS.xlsx")
 
 st.sidebar.divider()
-konfirmasi = st.sidebar.checkbox("Yakin hapus SEMUA?")
+st.sidebar.markdown("###  Hapus Keseluruhan Data")
+konfirmasi = st.sidebar.checkbox("Saya yakin ingin menghapus SEMUA data")
 if st.sidebar.button("🗑️ Kosongkan Data Cloud", type="primary", disabled=not konfirmasi):
     conn.table("kas_kecil").delete().neq("id", 0).execute()
     st.rerun()
+
+if 'df_raw' not in locals() or df_raw.empty:
+    st.info("Belum ada data di Cloud Database.")
