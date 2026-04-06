@@ -198,7 +198,7 @@ if not df_raw.empty:
 
 st.sidebar.divider()
 st.sidebar.markdown("### Hapus Keseluruhan Data")
-konf = st.sidebar.checkbox("Yakin hapus SEMUA?")
+konf = st.sidebar.checkbox("Saya Ingin Menghapus Semua Data")
 if st.sidebar.button("🗑️ Kosongkan Data", type="primary", disabled=not konf):
     conn.table("kas_kecil").delete().neq("id", 0).execute()
     st.rerun()
