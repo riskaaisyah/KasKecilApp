@@ -49,16 +49,16 @@ with st.form("form_kas", clear_on_submit=True):
     
     submit = st.form_submit_button("Simpan ke Cloud 🚀")
 
-# --- LOGIKA SIMPAN ---
+# --- LOGIKA SIMPAN (FIX: SESUAI TANGGAL PILIHAN) ---
 if submit:
     if vendor and (jumlah is not None):
         try:
             target_uraian = "Karcis Parkir Kendaraan Operasional"
             
             if uraian_pilih == target_uraian:
-                # Logika Akumulasi Karcis di Bulan yang sama
-                bulan_ini = datetime.date.today().month
-                tahun_ini = datetime.date.today().year
+                # Ambil bulan dan tahun dari TANGGAL YANG DIPILIH di kalender
+                bulan_pilihan = tanggal_input.month
+                tahun_pilihan = tanggal_input.year
                 
                 res = conn.table("kas_kecil").select("*").eq("uraian", target_uraian).execute()
                 df_cek = pd.DataFrame(res.data)
@@ -66,23 +66,37 @@ if submit:
                 found = False
                 if not df_cek.empty:
                     df_cek['tgl_temp'] = pd.to_datetime(df_cek['tanggal'], errors='coerce')
-                    match = df_cek[(df_cek['tgl_temp'].dt.month == bulan_ini) & (df_cek['tgl_temp'].dt.year == tahun_ini)]
+                    # Cari apakah sudah ada karcis di BULAN & TAHUN YANG SAMA dengan pilihan kalender
+                    match = df_cek[(df_cek['tgl_temp'].dt.month == bulan_pilihan) & (df_cek['tgl_temp'].dt.year == tahun_pilihan)]
                     
                     if not match.empty:
                         id_lama = match.iloc[0]['id']
                         jumlah_baru = match.iloc[0]['jumlah'] + jumlah
-                        conn.table("kas_kecil").update({"jumlah": int(jumlah_baru)}).eq("id", id_lama).execute()
+                        
+                        # Hapus yang lama, insert baru agar ID jadi yang terbaru (paling bawah)
+                        conn.table("kas_kecil").delete().eq("id", id_lama).execute()
+                        
+                        data_update = {
+                            "uraian": target_uraian,
+                            "vendor": vendor,
+                            "tanggal": str(tanggal_input), # Pakai tanggal pilihan kalender
+                            "jumlah": int(jumlah_baru)
+                        }
+                        conn.table("kas_kecil").insert(data_update).execute()
                         found = True
                 
                 if not found:
-                    data_karcis = {
+                    # Jika belum ada karcis di bulan tersebut, buat baru
+                    data_baru = {
                         "uraian": target_uraian,
                         "vendor": vendor,
-                        "tanggal": str(datetime.date.today()), # Kasih tanggal hari ini untuk sistem batching
+                        "tanggal": str(tanggal_input),
                         "jumlah": int(jumlah)
                     }
-                    conn.table("kas_kecil").insert(data_karcis).execute()
+                    conn.table("kas_kecil").insert(data_baru).execute()
+            
             else:
+                # KATEGORI NORMAL
                 data_normal = {
                     "uraian": uraian_pilih,
                     "vendor": vendor,
@@ -91,12 +105,10 @@ if submit:
                 }
                 conn.table("kas_kecil").insert(data_normal).execute()
             
-            st.success("Data Berhasil Tersimpan!")
+            st.success("Data Berhasil Diperbarui!")
             st.rerun()
         except Exception as e:
             st.error(f"Gagal Simpan: {e}")
-    else:
-        st.warning("Mohon isi Nama Vendor dan Jumlah!")
 
 # --- REKAPITULASI ---
 st.divider()
