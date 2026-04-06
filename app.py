@@ -35,17 +35,20 @@ opsi_uraian = [
     "Isi BBM Kendaraan Operasional"
 ]
 
-# --- FORM INPUT ---
+# --- FORM INPUT (Disesuaikan agar Enter lebih responsif) ---
 with st.form("form_kas", clear_on_submit=True):
     st.subheader("Input Data Transaksi")
     col1, col2 = st.columns(2)
     with col1:
         uraian_pilih = st.selectbox("Uraian", opsi_uraian)
-        vendor = st.text_input("Nama Vendor", placeholder="Contoh: Toko Buku Gramedia")
+        # Placeholder membantu user tahu apa yang harus diisi
+        vendor = st.text_input("Nama Vendor", placeholder="Ketik vendor lalu Enter...")
     with col2:
         tanggal_input = st.date_input("Tanggal", value=datetime.date.today())
-        jumlah = st.number_input("Jumlah (Nominal)", min_value=0, step=1000, value=None)
+        # Kita pakai value=0 atau biarkan saja, Enter akan memicu submit
+        jumlah = st.number_input("Jumlah (Nominal)", min_value=0, step=1000)
     
+    # Tombol submit ini adalah kunci 'Enter' di keyboard
     submit = st.form_submit_button("Simpan ke Cloud 🚀")
 
 # --- LOGIKA SIMPAN ---
