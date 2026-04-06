@@ -222,6 +222,24 @@ if not df_raw.empty:
         st.sidebar.download_button(
             label="⬇️ Download Excel Multi-Sheet",
             data=buf.getvalue(),
-            file_name=f"Rekap_BIOS_Limit_{datetime.date.today()}.xlsx",
+            file_name=f"2026 kas kecil _REKAPITULASI PENGGUNAAN KAS.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
+# --- FITUR CLEAR ALL DATA (DI SIDEBAR) ---
+st.sidebar.divider()
+st.sidebar.subheader("⚠️ Zona Bahaya")
+
+# Checkbox konfirmasi agar tidak asal klik
+konfirmasi_hapus = st.sidebar.checkbox("Saya yakin ingin menghapus SEMUA data")
+
+if st.sidebar.button("🗑️ Kosongkan Semua Data Cloud", type="primary", disabled=not konfirmasi_hapus):
+    try:
+        # Menghapus semua baris di tabel 'kas_kecil'
+        # Di Supabase, .neq("id", 0) adalah trik untuk memilih semua baris karena ID pasti bukan 0
+        conn.table("kas_kecil").delete().neq("id", 0).execute()
+        
+        st.sidebar.success("Semua data telah dibersihkan!")
+        st.rerun() # Refresh tampilan agar tabel jadi kosong
+    except Exception as e:
+        st.sidebar.error(f"Gagal menghapus: {e}")
