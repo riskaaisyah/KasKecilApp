@@ -68,11 +68,11 @@ if submit:
         except Exception as e:
             st.error(f"Gagal kirim ke Cloud: {e}")
     else:
-        st.warning("Mohon isi Nama Vendor dan Jumlah dulu ya!")
+        st.warning("Mohon isi Nama Vendor dan Jumlah dulu!")
 
     # --- REKAPITULASI (VERSI FINAL: LIMIT 25JT & RESET TIAP BULAN) ---
 st.divider()
-st.subheader("📋 Rekapitulasi Kas (Limit 25jt/Sheet)")
+st.subheader("📋 Rekapitulasi Kas")
 
 df_raw = fetch_data()
 
