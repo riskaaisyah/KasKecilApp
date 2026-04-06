@@ -227,9 +227,6 @@ if not df_raw.empty:
         )
 
 # --- FITUR CLEAR ALL DATA (DI SIDEBAR) ---
-st.sidebar.divider()
-st.sidebar.subheader("⚠️ Zona Bahaya")
-
 # Checkbox konfirmasi agar tidak asal klik
 konfirmasi_hapus = st.sidebar.checkbox("Saya yakin ingin menghapus SEMUA data")
 
