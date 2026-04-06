@@ -152,7 +152,7 @@ if not df_raw.empty:
                 }
             )
 
-            if st.button(f"💾 Simpan Perubahan {g}", key=f"save_{g}"):
+            if st.button(f"Simpan Perubahan {g}", key=f"save_{g}"):
                 try:
                     ids_old = set(df_for_edit['id'].tolist())
                     ids_new = set(edited_df['id'].dropna().astype(int).tolist())
