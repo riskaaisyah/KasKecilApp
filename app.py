@@ -104,7 +104,6 @@ df_raw = fetch_data()
 
 if not df_raw.empty:
     LIMIT_KAS = 25_000_000
-    # KUNCI PERBAIKAN: Pastikan kolom tanggal benar-benar jadi tipe Date objek sebelum masuk editor
     df_raw['tanggal_dt'] = pd.to_datetime(df_raw['tanggal'], errors='coerce')
     df_raw = df_raw.sort_values('id')
     
@@ -132,6 +131,7 @@ if not df_raw.empty:
             label = f"{nama_bulan_id[int(bln_num)]} ({current_batch}) {int(thn)}"
             df_raw.at[idx, 'Kelompok_Sheet'] = label
 
+    # --- TAMPILKAN EXPANDER (AUTO-SAVE) ---
     list_kelompok = [k for k in df_raw['Kelompok_Sheet'].unique() if k != ""][::-1]
 
     for kelompok in list_kelompok:
@@ -140,12 +140,10 @@ if not df_raw.empty:
         sisa_kuota = LIMIT_KAS - total_group
         
         with st.expander(f"📂 {kelompok} | Total: Rp {total_group:,.0f} | 💰 Sisa: Rp {sisa_kuota:,.0f}".replace(",", "."), expanded=True):
-            # Data yang diedit (Pastikan kolom tanggal sudah jadi datetime objek)
             df_edit = df_group[['id', 'uraian', 'vendor', 'tanggal_dt', 'jumlah']].copy()
-            # Rename biar judul kolom di tabel bagus
             df_edit.columns = ['id', 'uraian', 'vendor', 'tanggal', 'jumlah']
             
-            edited_df = st.data_editor(
+            edited_data = st.data_editor(
                 df_edit,
                 key=f"editor_{kelompok}",
                 num_rows="dynamic",
@@ -153,37 +151,39 @@ if not df_raw.empty:
                 column_config={
                     "id": None,
                     "uraian": st.column_config.SelectboxColumn("Uraian", options=opsi_uraian),
-                    "vendor": "Vendor",
                     "tanggal": st.column_config.DateColumn("Tanggal"),
                     "jumlah": st.column_config.NumberColumn("Jumlah", format="%d")
                 }
             )
 
-            if st.button(f"💾 Simpan Perubahan {kelompok}", key=f"btn_{kelompok}"):
+            # --- LOGIKA AUTO-SAVE ---
+            if not edited_data.equals(df_edit):
                 try:
                     ids_asli = set(df_edit['id'].tolist())
-                    # filter pd.notna untuk id agar tidak error baris baru
-                    ids_sekarang = set(edited_df['id'].dropna().tolist())
+                    ids_sekarang = set(edited_data['id'].dropna().tolist())
                     ids_dihapus = ids_asli - ids_sekarang
                     
                     for d_id in ids_dihapus:
                         conn.table("kas_kecil").delete().eq("id", d_id).execute()
                     
-                    for _, r in edited_df.iterrows():
-                        if pd.notna(r['id']):
-                            conn.table("kas_kecil").update({
-                                "uraian": r['uraian'], "vendor": r['vendor'],
-                                "tanggal": str(r['tanggal'].date()) if hasattr(r['tanggal'], 'date') else str(r['tanggal']), 
-                                "jumlah": int(r['jumlah'])
-                            }).eq("id", r['id']).execute()
-                    st.success("Tersimpan!")
+                    for index, row_baru in edited_data.iterrows():
+                        if pd.notna(row_baru['id']):
+                            row_lama = df_edit[df_edit['id'] == row_baru['id']].iloc[0]
+                            if not row_baru.equals(row_lama):
+                                conn.table("kas_kecil").update({
+                                    "uraian": row_baru['uraian'], "vendor": row_baru['vendor'],
+                                    "tanggal": str(row_baru['tanggal']), "jumlah": int(row_baru['jumlah'])
+                                }).eq("id", row_baru['id']).execute()
+                    st.toast("Perubahan disimpan!", icon="✅")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Gagal: {e}")
+                    st.error(f"Gagal simpan otomatis: {e}")
+else:
+    st.info("Belum ada data.")
 
 # --- SIDEBAR ---
 st.sidebar.markdown("### 💾 Simpan Rekap Kas Kecil")
-if not df_raw.empty:
+if 'df_raw' in locals() and not df_raw.empty:
     if st.sidebar.button("💾 Siapkan Excel Format BIOS"):
         from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
         wb = Workbook()
@@ -196,32 +196,17 @@ if not df_raw.empty:
             ws['B2'].font = Font(bold=True, color="FFFFFF", size=14)
             ws['B2'].alignment = Alignment(horizontal="center", vertical="center")
             ws['B2'].fill = PatternFill(start_color="CC9900", end_color="CC9900", fill_type="solid")
-            
             ws['A5'] = "PERTANGGUNGJAWABAN ATAS ND PENGAJUAN NOMOR KU.02.04/19/11/1/PBLU/PBLU-25"
-            ws['A5'].font = Font(bold=True)
-            
             headers = ["No", "URAIAN", "NAMA VENDOR", "POS MATA ANGGARAN", "GL ACCOUNT", "TANGGAL TRANSAKSI", "JUMLAH PENGGUNAAN", "SETELAH PPN"]
             ws.append([])
             ws.append(headers)
-            for cell in ws[7]:
-                cell.fill = PatternFill(start_color="00FFFF", end_color="00FFFF", fill_type="solid")
-                cell.font = Font(bold=True)
-                cell.alignment = Alignment(horizontal="center")
-                cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
-
             df_b = df_raw[df_raw['Kelompok_Sheet'] == p]
             for i, row in enumerate(df_b.itertuples(), 1):
-                # Sembunyikan tanggal excel jika karcis
                 tgl = "" if row.uraian == "Karcis Parkir Kendaraan Operasional" else str(row.tanggal)
                 ws.append([i, f"{i} {row.uraian}", row.vendor, "", "", tgl, row.jumlah, row.jumlah])
-                for cell in ws[ws.max_row]:
-                    cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
-                    if isinstance(cell.value, (int, float)):
-                        cell.number_format = '#,##0'
-            
         buf = BytesIO()
         wb.save(buf)
-        st.sidebar.download_button("⬇️ Download Excel", buf.getvalue(), "Rekap_Kas_BIOS.xlsx")
+        st.sidebar.download_button("⬇️ Download Excel", buf.getvalue(), "Rekap_BIOS.xlsx")
 
 st.sidebar.divider()
 st.sidebar.markdown("### 🗑️ Hapus Keseluruhan Data")
@@ -232,7 +217,3 @@ if st.sidebar.button("🗑️ Kosongkan Data", type="primary", disabled=not konf
         st.rerun()
     except Exception as e:
         st.sidebar.error(f"Gagal: {e}")
-
-else:
-    if 'df_raw' not in locals() or df_raw.empty:
-        st.info("Belum ada data.")
