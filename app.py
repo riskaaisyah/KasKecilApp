@@ -157,21 +157,52 @@ if not df_raw.empty:
         total_group = df_group['jumlah'].sum()
         sisa_kuota = LIMIT_KAS - total_group
         
+        # Judul Expander dengan Total & Sisa
         with st.expander(f"📂 {kelompok} | Total: Rp {total_group:,.0f} | 💰 Sisa: Rp {sisa_kuota:,.0f}".replace(",", "."), expanded=True):
-            df_group['No'] = range(1, len(df_group) + 1)
             
-            # Sembunyikan tanggal jika Karcis
-            df_group['Tanggal_Tampil'] = df_group.apply(
-                lambda x: "" if x['uraian'] == "Karcis Parkir Kendaraan Operasional" else x['tanggal'], axis=1
+            # Persiapkan data untuk diedit (id harus ikut tapi nanti disembunyikan)
+            df_edit = df_group[['id', 'uraian', 'vendor', 'tanggal', 'jumlah']].copy()
+            
+            # TABEL INTERAKTIF
+            edited_df = st.data_editor(
+                df_edit,
+                key=f"editor_{kelompok}",
+                num_rows="dynamic", # Mengaktifkan fitur hapus baris
+                use_container_width=True,
+                column_config={
+                    "id": None, # Kolom ID tidak perlu dilihat user
+                    "uraian": st.column_config.SelectboxColumn("Uraian", options=opsi_uraian),
+                    "vendor": "Vendor",
+                    "tanggal": st.column_config.DateColumn("Tanggal"),
+                    "jumlah": st.column_config.NumberColumn("Jumlah (Rp)", format="%d")
+                }
             )
-            df_group['Uraian_Tampil'] = df_group.apply(lambda x: f"{x['No']} {x['uraian']}", axis=1)
-            
-            df_display = df_group[['No', 'Uraian_Tampil', 'vendor', 'Tanggal_Tampil', 'jumlah']].copy()
-            df_display.columns = ['No', 'Uraian', 'Vendor', 'Tanggal', 'Jumlah']
-            
-            df_style = df_display.copy()
-            df_style['Jumlah'] = df_style['Jumlah'].apply(lambda x: f"{x:,.0f}".replace(",", "."))
-            st.data_editor(df_style, use_container_width=True, key=f"editor_{kelompok}")
+
+            # TOMBOL KONFIRMASI (Harus diklik agar Total & Sisa di atas berubah)
+            if st.button(f"💾 Simpan Perubahan {kelompok}", key=f"btn_{kelompok}"):
+                try:
+                    # Cek Baris yang Dihapus
+                    ids_asli = set(df_edit['id'].tolist())
+                    ids_sekarang = set(edited_df['id'].dropna().tolist()) # ddropna kalau ada baris baru kosong
+                    ids_dihapus = ids_asli - ids_sekarang
+                    
+                    for d_id in ids_dihapus:
+                        conn.table("kas_kecil").delete().eq("id", d_id).execute()
+                    
+                    # Cek Baris yang Diedit
+                    for _, row_edit in edited_df.iterrows():
+                        if pd.notna(row_edit['id']): # Hanya update baris yang sudah ada ID-nya
+                            conn.table("kas_kecil").update({
+                                "uraian": row_edit['uraian'],
+                                "vendor": row_edit['vendor'],
+                                "tanggal": str(row_edit['tanggal']),
+                                "jumlah": int(row_edit['jumlah'])
+                            }).eq("id", row_edit['id']).execute()
+                    
+                    st.success(f"Berhasil! Data {kelompok} sudah terupdate.")
+                    st.rerun() # Ini yang bikin Total & Sisa langsung berubah
+                except Exception as e:
+                    st.error(f"Waduh, gagal update: {e}")
 
     # --- DOWNLOAD EXCEL ---
     st.sidebar.markdown("### Simpan Rekap Kas Kecil")
