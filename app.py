@@ -174,6 +174,8 @@ if not df_raw.empty:
             st.data_editor(df_style, use_container_width=True, key=f"editor_{kelompok}")
 
     # --- DOWNLOAD EXCEL ---
+    st.sidebar.markdown("### Simpan Rekap Kas Kecil")
+    
     st.sidebar.divider()
     if st.sidebar.button("💾 Siapkan Excel Format BIOS"):
         from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
@@ -229,6 +231,7 @@ else:
     st.info("Belum ada data.")
 
 # --- CLEAR DATA ---
+st.sidebar.markdown("### Hapus Keseluruhan Data")
 st.sidebar.divider()
 konfirmasi_hapus = st.sidebar.checkbox("Saya yakin ingin menghapus SEMUA data")
 if st.sidebar.button("🗑️ Kosongkan Data", type="primary", disabled=not konfirmasi_hapus):
