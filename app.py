@@ -53,34 +53,36 @@ with st.form("form_kas", clear_on_submit=True):
 if submit:
     if vendor and (jumlah is not None):
         try:
-            # KHUSUS KARCIS PARKIR (AKUMULASI)
             target_uraian = "Karcis Parkir Kendaraan Operasional"
             
             if uraian_pilih == target_uraian:
-                # 1. Cek apakah sudah ada data Karcis Parkir di database
-                res = conn.table("kas_kecil").select("*").eq("uraian", target_uraian).execute()
+                # Logika Akumulasi Karcis di Bulan yang sama
+                bulan_ini = datetime.date.today().month
+                tahun_ini = datetime.date.today().year
                 
-                if res.data:
-                    # 2. Jika ADA, ambil jumlah lama dan tambah dengan jumlah baru
-                    id_lama = res.data[0]['id']
-                    jumlah_lama = res.data[0]['jumlah']
-                    jumlah_baru = jumlah_lama + jumlah
+                res = conn.table("kas_kecil").select("*").eq("uraian", target_uraian).execute()
+                df_cek = pd.DataFrame(res.data)
+                
+                found = False
+                if not df_cek.empty:
+                    df_cek['tgl_temp'] = pd.to_datetime(df_cek['tanggal'], errors='coerce')
+                    match = df_cek[(df_cek['tgl_temp'].dt.month == bulan_ini) & (df_cek['tgl_temp'].dt.year == tahun_ini)]
                     
-                    conn.table("kas_kecil").update({"jumlah": int(jumlah_baru)}).eq("id", id_lama).execute()
-                    st.success(f"Saldo {target_uraian} berhasil ditambahkan!")
-                else:
-                    # 3. Jika BELUM ADA, buat baris baru (tanpa tanggal/kosongkan)
+                    if not match.empty:
+                        id_lama = match.iloc[0]['id']
+                        jumlah_baru = match.iloc[0]['jumlah'] + jumlah
+                        conn.table("kas_kecil").update({"jumlah": int(jumlah_baru)}).eq("id", id_lama).execute()
+                        found = True
+                
+                if not found:
                     data_karcis = {
                         "uraian": target_uraian,
                         "vendor": vendor,
-                        "tanggal": "Selamanya", # Penanda khusus karena tidak butuh tanggal
+                        "tanggal": str(datetime.date.today()), # Kasih tanggal hari ini untuk sistem batching
                         "jumlah": int(jumlah)
                     }
                     conn.table("kas_kecil").insert(data_karcis).execute()
-                    st.success(f"Kategori {target_uraian} pertama berhasil dibuat!")
-            
             else:
-                # UNTUK KATEGORI LAIN (NORMAL / BUAT BARIS BARU)
                 data_normal = {
                     "uraian": uraian_pilih,
                     "vendor": vendor,
@@ -88,41 +90,43 @@ if submit:
                     "jumlah": int(jumlah)
                 }
                 conn.table("kas_kecil").insert(data_normal).execute()
-                st.success("Data Berhasil Tersimpan!")
             
+            st.success("Data Berhasil Tersimpan!")
             st.rerun()
-            
         except Exception as e:
             st.error(f"Gagal Simpan: {e}")
     else:
         st.warning("Mohon isi Nama Vendor dan Jumlah!")
-        
-    # --- REKAPITULASI (DENGAN INFO TOTAL & SISA KUOTA) ---
+
+# --- REKAPITULASI ---
 st.divider()
 st.subheader("📋 Rekapitulasi Kas (Limit 25jt/Sheet)")
 
 df_raw = fetch_data()
 
 if not df_raw.empty:
-    # --- 1. PREPARASI DATA ---
     LIMIT_KAS = 25_000_000
     df_raw['tanggal_dt'] = pd.to_datetime(df_raw['tanggal'], errors='coerce')
-    df_raw = df_raw.dropna(subset=['tanggal_dt']).sort_values(['tanggal_dt', 'id'])
+    # Jangan gunakan dropna karena data Karcis mungkin bermasalah formatnya
+    df_raw = df_raw.sort_values('id')
     
     nama_bulan_id = {1: "JANUARI", 2: "FEBRUARI", 3: "MARET", 4: "APRIL", 5: "MEI", 6: "JUNI", 
                      7: "JULI", 8: "AGUSTUS", 9: "SEPTEMBER", 10: "OKTOBER", 11: "NOVEMBER", 12: "DESEMBER"}
 
-    # --- 2. LOGIKA BATCHING PER BULAN ---
+    # --- LOGIKA BATCHING ---
     df_raw['Kelompok_Sheet'] = "" 
+    # Buat temp kolom untuk grouping periode
     df_raw['temp_month'] = df_raw['tanggal_dt'].dt.month
     df_raw['temp_year'] = df_raw['tanggal_dt'].dt.year
-    distinct_periods = df_raw[['temp_year', 'temp_month']].drop_duplicates().values
+    
+    periods = df_raw[['temp_year', 'temp_month']].drop_duplicates().values
 
-    for thn, bln_num in distinct_periods:
+    for thn, bln_num in periods:
+        if pd.isna(bln_num): continue # Lewati jika tanggal rusak
         current_batch = 1
         running_total = 0
         mask = (df_raw['temp_year'] == thn) & (df_raw['temp_month'] == bln_num)
-        df_bulan = df_raw[mask].sort_values(['tanggal_dt', 'id'])
+        df_bulan = df_raw[mask].sort_values('id')
         
         for idx, row in df_bulan.iterrows():
             if running_total + row['jumlah'] > LIMIT_KAS:
@@ -130,63 +134,48 @@ if not df_raw.empty:
                 running_total = row['jumlah']
             else:
                 running_total += row['jumlah']
-            
-            label = f"{nama_bulan_id[bln_num]} ({current_batch}) {int(thn)}"
+            label = f"{nama_bulan_id[int(bln_num)]} ({current_batch}) {int(thn)}"
             df_raw.at[idx, 'Kelompok_Sheet'] = label
 
-    df_raw = df_raw.drop(columns=['temp_month', 'temp_year'])
-
-    # --- 3. TAMPILKAN EXPANDER DENGAN INFO SISA ---
-    list_kelompok = df_raw['Kelompok_Sheet'].unique()[::-1]
+    # --- TAMPILKAN EXPANDER ---
+    list_kelompok = [k for k in df_raw['Kelompok_Sheet'].unique() if k != ""][::-1]
 
     for kelompok in list_kelompok:
         df_group = df_raw[df_raw['Kelompok_Sheet'] == kelompok].copy()
         total_group = df_group['jumlah'].sum()
-        
-        # LOGIKA SISA KUOTA
         sisa_kuota = LIMIT_KAS - total_group
         
-        # Format string untuk judul expander
-        total_str = f"Rp {total_group:,.0f}".replace(",", ".")
-        sisa_str = f"Rp {sisa_kuota:,.0f}".replace(",", ".")
-        
-        # Judul Expander sekarang lebih informatif
-        with st.expander(f"📂 {kelompok} | Total: {total_str} | 💰 Sisa: {sisa_str}", expanded=True):
+        with st.expander(f"📂 {kelompok} | Total: Rp {total_group:,.0f} | 💰 Sisa: Rp {sisa_kuota:,.0f}".replace(",", "."), expanded=True):
             df_group['No'] = range(1, len(df_group) + 1)
+            
+            # Sembunyikan tanggal jika Karcis
+            df_group['Tanggal_Tampil'] = df_group.apply(
+                lambda x: "" if x['uraian'] == "Karcis Parkir Kendaraan Operasional" else x['tanggal'], axis=1
+            )
             df_group['Uraian_Tampil'] = df_group.apply(lambda x: f"{x['No']} {x['uraian']}", axis=1)
             
-            df_display = df_group[['No', 'Uraian_Tampil', 'vendor', 'tanggal', 'jumlah']].copy()
+            df_display = df_group[['No', 'Uraian_Tampil', 'vendor', 'Tanggal_Tampil', 'jumlah']].copy()
             df_display.columns = ['No', 'Uraian', 'Vendor', 'Tanggal', 'Jumlah']
             
             df_style = df_display.copy()
             df_style['Jumlah'] = df_style['Jumlah'].apply(lambda x: f"{x:,.0f}".replace(",", "."))
-            
             st.data_editor(df_style, use_container_width=True, key=f"editor_{kelompok}")
 
-else:
-    st.info("Belum ada data yang tersimpan di Cloud Database.")
-
-# --- DOWNLOAD EXCEL ---
-if not df_raw.empty:
+    # --- DOWNLOAD EXCEL ---
+    st.sidebar.divider()
     if st.sidebar.button("💾 Siapkan Excel Format BIOS"):
         from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-        from openpyxl import Workbook
-        
         wb = Workbook()
-        del wb['Sheet'] # Hapus sheet bawaan yang kosong
-
-        # Warna & Style (Sesuai Gambar 2 yang kamu mau)
-        header_fill = PatternFill(start_color="00FFFF", end_color="00FFFF", fill_type="solid") # Tosca
-        title_fill = PatternFill(start_color="CC9900", end_color="CC9900", fill_type="solid")  # Cokelat Judul
+        del wb['Sheet']
+        
+        header_fill = PatternFill(start_color="00FFFF", end_color="00FFFF", fill_type="solid")
+        title_fill = PatternFill(start_color="CC9900", end_color="CC9900", fill_type="solid")
         thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), 
                              top=Side(style='thin'), bottom=Side(style='thin'))
 
-        # Kita gunakan 'Kelompok_Sheet' yang sudah dibuat di bagian Rekapitulasi
-        # Setiap kelompok (Januari 1, Januari 2, dst) akan jadi satu Sheet
-        for kelompok in df_raw['Kelompok_Sheet'].unique():
-            ws = wb.create_sheet(title=kelompok)
-            
-            # 1. Judul Besar (Merge Cell B2:I3)
+        for p in df_raw['Kelompok_Sheet'].unique():
+            if p == "": continue
+            ws = wb.create_sheet(title=p[:31])
             ws.merge_cells('B2:I3')
             cell_judul = ws['B2']
             cell_judul.value = "APLIKASI BIOS (BIAYA OPERASIONAL)"
@@ -194,14 +183,12 @@ if not df_raw.empty:
             cell_judul.alignment = Alignment(horizontal="center", vertical="center")
             cell_judul.fill = title_fill
 
-            # 2. Sub-judul Nota Dinas (Baris 5)
             ws['A5'] = "PERTANGGUNGJAWABAN ATAS ND PENGAJUAN NOMOR KU.02.04/19/11/1/PBLU/PBLU-25"
             ws['A5'].font = Font(bold=True, size=10)
 
-            # 3. Header Tabel (Baris 7)
             headers = ["No", "URAIAN", "NAMA VENDOR", "POS MATA ANGGARAN", "GL ACCOUNT", "TANGGAL TRANSAKSI", "JUMLAH PENGGUNAAN", "SETELAH PPN"]
-            ws.append([]) # Baris kosong 6
-            ws.append(headers) # Baris 7
+            ws.append([]) 
+            ws.append(headers) 
             
             for cell in ws[7]:
                 cell.fill = header_fill
@@ -209,57 +196,32 @@ if not df_raw.empty:
                 cell.alignment = Alignment(horizontal="center", vertical="center")
                 cell.border = thin_border
 
-            # 4. Isi Data Khusus Batch Ini
-            df_batch = df_raw[df_raw['Kelompok_Sheet'] == kelompok]
-            for i, row in enumerate(df_batch.values, 1):
-                # row[1]=uraian, row[2]=vendor, row[3]=tanggal, row[4]=jumlah
-                baris_data = [
-                    i, 
-                    f"{i} {row[1]}", 
-                    row[2], 
-                    "", # Pos Mata Anggaran (kosong)
-                    "", # GL Account (kosong)
-                    row[3], 
-                    row[4], 
-                    row[4]
-                ]
-                ws.append(baris_data)
-                
-                # Tambah border & format ribuan
+            df_batch = df_raw[df_raw['Kelompok_Sheet'] == p]
+            for i, row in enumerate(df_batch.itertuples(), 1):
+                # row.uraian, row.vendor, row.tanggal, row.jumlah
+                tgl_excel = "" if row.uraian == "Karcis Parkir Kendaraan Operasional" else row.tanggal
+                ws.append([i, f"{i} {row.uraian}", row.vendor, "", "", tgl_excel, row.jumlah, row.jumlah])
                 for cell in ws[ws.max_row]:
                     cell.border = thin_border
                     if isinstance(cell.value, (int, float)):
                         cell.number_format = '#,##0'
 
-            # 5. Atur Lebar Kolom agar rapi
             ws.column_dimensions['B'].width = 35
             ws.column_dimensions['C'].width = 25
-            ws.column_dimensions['F'].width = 20
-            ws.column_dimensions['G'].width = 18
-            ws.column_dimensions['H'].width = 18
 
-        # Simpan ke Buffer
         buf = BytesIO()
         wb.save(buf)
-        st.sidebar.success(f"Siap! Terbagi jadi {len(df_raw['Kelompok_Sheet'].unique())} Sheet.")
-        st.sidebar.download_button(
-            label="⬇️ Download Excel Multi-Sheet",
-            data=buf.getvalue(),
-            file_name=f"2026 kas kecil _REKAPITULASI PENGGUNAAN KAS.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        st.sidebar.download_button("⬇️ Download Excel", buf.getvalue(), "Rekap_BIOS.xlsx")
 
-# --- FITUR CLEAR ALL DATA (DI SIDEBAR) ---
-# Checkbox konfirmasi agar tidak asal klik
+else:
+    st.info("Belum ada data.")
+
+# --- CLEAR DATA ---
+st.sidebar.divider()
 konfirmasi_hapus = st.sidebar.checkbox("Saya yakin ingin menghapus SEMUA data")
-
-if st.sidebar.button("🗑️ Kosongkan Semua Data Cloud", type="primary", disabled=not konfirmasi_hapus):
+if st.sidebar.button("🗑️ Kosongkan Data", type="primary", disabled=not konfirmasi_hapus):
     try:
-        # Menghapus semua baris di tabel 'kas_kecil'
-        # Di Supabase, .neq("id", 0) adalah trik untuk memilih semua baris karena ID pasti bukan 0
         conn.table("kas_kecil").delete().neq("id", 0).execute()
-        
-        st.sidebar.success("Semua data telah dibersihkan!")
-        st.rerun() # Refresh tampilan agar tabel jadi kosong
+        st.rerun()
     except Exception as e:
-        st.sidebar.error(f"Gagal menghapus: {e}")
+        st.sidebar.error(f"Gagal: {e}")
