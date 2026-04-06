@@ -49,27 +49,54 @@ with st.form("form_kas", clear_on_submit=True):
     
     submit = st.form_submit_button("Simpan ke Cloud 🚀")
 
-# --- LOGIKA SIMPAN (SUDAH DIPERBAIKI) ---
+# --- LOGIKA SIMPAN ---
 if submit:
-    if vendor and jumlah is not None:
-        # Menyiapkan data untuk dikirim
-        data_baru = {
-            "uraian": uraian_pilih,
-            "vendor": vendor,
-            "tanggal": str(tanggal_input),
-            "jumlah": int(jumlah)
-        }
-        
+    if vendor and (jumlah is not None):
         try:
-            # PROSES KIRIM KE SUPABASE
-            conn.table("kas_kecil").insert(data_baru).execute()
-            st.success(f"Berhasil menyimpan: {uraian_pilih} - Rp {jumlah:,.0f}".replace(",", "."))
-            st.rerun() # Refresh agar data muncul di tabel bawah
+            # KHUSUS KARCIS PARKIR (AKUMULASI)
+            target_uraian = "Karcis Parkir Kendaraan Operasional"
+            
+            if uraian_pilih == target_uraian:
+                # 1. Cek apakah sudah ada data Karcis Parkir di database
+                res = conn.table("kas_kecil").select("*").eq("uraian", target_uraian).execute()
+                
+                if res.data:
+                    # 2. Jika ADA, ambil jumlah lama dan tambah dengan jumlah baru
+                    id_lama = res.data[0]['id']
+                    jumlah_lama = res.data[0]['jumlah']
+                    jumlah_baru = jumlah_lama + jumlah
+                    
+                    conn.table("kas_kecil").update({"jumlah": int(jumlah_baru)}).eq("id", id_lama).execute()
+                    st.success(f"Saldo {target_uraian} berhasil ditambahkan!")
+                else:
+                    # 3. Jika BELUM ADA, buat baris baru (tanpa tanggal/kosongkan)
+                    data_karcis = {
+                        "uraian": target_uraian,
+                        "vendor": vendor,
+                        "tanggal": "Selamanya", # Penanda khusus karena tidak butuh tanggal
+                        "jumlah": int(jumlah)
+                    }
+                    conn.table("kas_kecil").insert(data_karcis).execute()
+                    st.success(f"Kategori {target_uraian} pertama berhasil dibuat!")
+            
+            else:
+                # UNTUK KATEGORI LAIN (NORMAL / BUAT BARIS BARU)
+                data_normal = {
+                    "uraian": uraian_pilih,
+                    "vendor": vendor,
+                    "tanggal": str(tanggal_input),
+                    "jumlah": int(jumlah)
+                }
+                conn.table("kas_kecil").insert(data_normal).execute()
+                st.success("Data Berhasil Tersimpan!")
+            
+            st.rerun()
+            
         except Exception as e:
-            st.error(f"Gagal kirim ke Cloud: {e}")
+            st.error(f"Gagal Simpan: {e}")
     else:
-        st.warning("Mohon isi Nama Vendor dan Jumlah dulu!")
-
+        st.warning("Mohon isi Nama Vendor dan Jumlah!")
+        
     # --- REKAPITULASI (DENGAN INFO TOTAL & SISA KUOTA) ---
 st.divider()
 st.subheader("📋 Rekapitulasi Kas (Limit 25jt/Sheet)")
