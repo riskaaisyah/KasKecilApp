@@ -70,9 +70,9 @@ if submit:
     else:
         st.warning("Mohon isi Nama Vendor dan Jumlah dulu!")
 
-    # --- REKAPITULASI (VERSI FINAL: LIMIT 25JT & RESET TIAP BULAN) ---
+    # --- REKAPITULASI (DENGAN INFO TOTAL & SISA KUOTA) ---
 st.divider()
-st.subheader("📋 Rekapitulasi Kas")
+st.subheader("📋 Rekapitulasi Kas (Limit 25jt/Sheet)")
 
 df_raw = fetch_data()
 
@@ -85,10 +85,8 @@ if not df_raw.empty:
     nama_bulan_id = {1: "JANUARI", 2: "FEBRUARI", 3: "MARET", 4: "APRIL", 5: "MEI", 6: "JUNI", 
                      7: "JULI", 8: "AGUSTUS", 9: "SEPTEMBER", 10: "OKTOBER", 11: "NOVEMBER", 12: "DESEMBER"}
 
-    # --- 2. LOGIKA BATCHING PER BULAN  ---
-    df_raw['Kelompok_Sheet'] = "" # Siapkan kolom kelompok
-    
-    # Ambil periode unik (Tahun & Bulan)
+    # --- 2. LOGIKA BATCHING PER BULAN ---
+    df_raw['Kelompok_Sheet'] = "" 
     df_raw['temp_month'] = df_raw['tanggal_dt'].dt.month
     df_raw['temp_year'] = df_raw['tanggal_dt'].dt.year
     distinct_periods = df_raw[['temp_year', 'temp_month']].drop_duplicates().values
@@ -96,48 +94,46 @@ if not df_raw.empty:
     for thn, bln_num in distinct_periods:
         current_batch = 1
         running_total = 0
-        
-        # Ambil data hanya untuk bulan & tahun yang sedang di-loop
         mask = (df_raw['temp_year'] == thn) & (df_raw['temp_month'] == bln_num)
         df_bulan = df_raw[mask].sort_values(['tanggal_dt', 'id'])
         
         for idx, row in df_bulan.iterrows():
-            # Jika ditambah transaksi ini lewat 25jt, naikkan nomor batch
             if running_total + row['jumlah'] > LIMIT_KAS:
                 current_batch += 1
                 running_total = row['jumlah']
             else:
                 running_total += row['jumlah']
             
-            # Label contoh: APRIL (1) 2026
             label = f"{nama_bulan_id[bln_num]} ({current_batch}) {int(thn)}"
             df_raw.at[idx, 'Kelompok_Sheet'] = label
 
-    # Hapus kolom bantuan
     df_raw = df_raw.drop(columns=['temp_month', 'temp_year'])
 
-    # --- 3. TAMPILKAN EXPANDER (Bulan terbaru tampil di paling atas) ---
-    # Kita urutkan list kelompok agar Batch (1) April muncul sebelum Batch (1) Januari
+    # --- 3. TAMPILKAN EXPANDER DENGAN INFO SISA ---
     list_kelompok = df_raw['Kelompok_Sheet'].unique()[::-1]
 
     for kelompok in list_kelompok:
         df_group = df_raw[df_raw['Kelompok_Sheet'] == kelompok].copy()
         total_group = df_group['jumlah'].sum()
         
-        with st.expander(f"📂 Data {kelompok} (Total: Rp {total_group:,.0f})".replace(",", "."), expanded=True):
-            # Penomoran ulang per batch agar rapi di tabel
+        # LOGIKA SISA KUOTA
+        sisa_kuota = LIMIT_KAS - total_group
+        
+        # Format string untuk judul expander
+        total_str = f"Rp {total_group:,.0f}".replace(",", ".")
+        sisa_str = f"Rp {sisa_kuota:,.0f}".replace(",", ".")
+        
+        # Judul Expander sekarang lebih informatif
+        with st.expander(f"📂 {kelompok} | Total: {total_str} | 💰 Sisa: {sisa_str}", expanded=True):
             df_group['No'] = range(1, len(df_group) + 1)
             df_group['Uraian_Tampil'] = df_group.apply(lambda x: f"{x['No']} {x['uraian']}", axis=1)
             
-            # Pilih kolom untuk ditampilkan
             df_display = df_group[['No', 'Uraian_Tampil', 'vendor', 'tanggal', 'jumlah']].copy()
             df_display.columns = ['No', 'Uraian', 'Vendor', 'Tanggal', 'Jumlah']
             
-            # Format tampilan angka ribuan dengan titik
             df_style = df_display.copy()
             df_style['Jumlah'] = df_style['Jumlah'].apply(lambda x: f"{x:,.0f}".replace(",", "."))
             
-            # Tampilkan tabel (gunakan data_editor agar bisa edit sewaktu-waktu)
             st.data_editor(df_style, use_container_width=True, key=f"editor_{kelompok}")
 
 else:
