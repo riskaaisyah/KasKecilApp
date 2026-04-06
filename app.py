@@ -70,16 +70,21 @@ if submit:
     else:
         st.warning("Mohon isi Nama Vendor dan Jumlah dulu ya!")
 
-# --- REKAPITULASI ---
+# --- REKAPITULASI (VERSI FINAL ANTI-ERROR) ---
 st.divider()
 st.subheader("📋 Rekapitulasi Kas (Limit 25jt/Sheet)")
 
-LIMIT_KAS = 25_000_000
+# 1. Pastikan ambil data dulu ke variabel df_raw
+df_raw = fetch_data() 
 
+# 2. Cek apakah datanya ada?
 if not df_raw.empty:
-    df_raw['tanggal_dt'] = pd.to_datetime(df_raw['tanggal'])
-    # Urutkan dari yang paling lama ke terbaru agar perhitungan batch-nya benar
-    df_raw = df_raw.sort_values('tanggal_dt')
+    LIMIT_KAS = 25_000_000
+    
+    # Olah tanggal agar bisa diurutkan
+    df_raw['tanggal_dt'] = pd.to_datetime(df_raw['tanggal'], errors='coerce')
+    df_raw = df_raw.dropna(subset=['tanggal_dt'])
+    df_raw = df_raw.sort_values('tanggal_dt') # Urutkan kronologis
     
     nama_bulan_id = {1: "JANUARI", 2: "FEBRUARI", 3: "MARET", 4: "APRIL", 5: "MEI", 6: "JUNI", 
                      7: "JULI", 8: "AGUSTUS", 9: "SEPTEMBER", 10: "OKTOBER", 11: "NOVEMBER", 12: "DESEMBER"}
@@ -87,21 +92,24 @@ if not df_raw.empty:
     # --- LOGIKA BATCHING (Pemisah 25 Juta) ---
     current_batch = 1
     running_total = 0
-    batch_list = []
+    batch_labels = []
 
-    for index, row in df_raw.iterrows():
+    for _, row in df_raw.iterrows():
+        # Jika ditambah transaksi ini jadi lewat 25jt, pindah batch
         if running_total + row['jumlah'] > LIMIT_KAS:
             current_batch += 1
-            running_total = row['jumlah'] # Reset hitungan ke nominal sekarang
+            running_total = row['jumlah']
         else:
             running_total += row['jumlah']
         
-        bln_thn = f"{nama_bulan_id[row['tanggal_dt'].month]} {current_batch} {row['tanggal_dt'].year}"
-        batch_list.append(bln_thn)
+        # Buat label kelompok: JANUARI 1 2026
+        bln = nama_bulan_id[row['tanggal_dt'].month]
+        thn = row['tanggal_dt'].year
+        batch_labels.append(f"{bln} ({current_batch}) {thn}")
 
-    df_raw['Kelompok_Sheet'] = batch_list
+    df_raw['Kelompok_Sheet'] = batch_labels
 
-    # Tampilkan terbalik (Bulan terbaru di atas)
+    # --- TAMPILKAN EXPANDER (Terbaru di atas) ---
     list_kelompok = df_raw['Kelompok_Sheet'].unique()[::-1]
 
     for kelompok in list_kelompok:
@@ -109,16 +117,19 @@ if not df_raw.empty:
         total_group = df_group['jumlah'].sum()
         
         with st.expander(f"📂 Data {kelompok} (Total: Rp {total_group:,.0f})".replace(",", "."), expanded=True):
+            # No urut diulang tiap batch
             df_group['No'] = range(1, len(df_group) + 1)
             df_group['Uraian_Tampil'] = df_group.apply(lambda x: f"{x['No']} {x['uraian']}", axis=1)
             
             df_display = df_group[['No', 'Uraian_Tampil', 'vendor', 'tanggal', 'jumlah']].copy()
             df_display.columns = ['No', 'Uraian', 'Vendor', 'Tanggal', 'Jumlah']
             
-            # Formatting untuk tampilan
+            # Format tampilan ribuan
             df_style = df_display.copy()
             df_style['Jumlah'] = df_style['Jumlah'].apply(lambda x: f"{x:,.0f}".replace(",", "."))
-            st.data_editor(df_style, use_container_width=True, key=f"table_{kelompok}")
+            st.data_editor(df_style, use_container_width=True, key=f"editor_{kelompok}")
+else:
+    st.info("Belum ada data yang tersimpan di Cloud Database.")
 
 # --- DOWNLOAD EXCEL ---
 if not df_raw.empty:
