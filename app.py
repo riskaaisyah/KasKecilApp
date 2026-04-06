@@ -33,29 +33,29 @@ opsi_uraian = [
     "Isi BBM Kendaraan Operasional"
 ]
 
-# --- 4. FORM INPUT (DIOPTIMALKAN UNTUK ENTER) ---
+# --- 4. FORM INPUT (BEBAS ANGKA 0 & DUKUNG ENTER) ---
 with st.form("form_kas", clear_on_submit=True):
     st.subheader("Input Data Transaksi")
     col1, col2 = st.columns(2)
     with col1:
         uraian_pilih = st.selectbox("Uraian", opsi_uraian)
-        vendor = st.text_input("Nama Vendor", placeholder="Ketik vendor...")
+        vendor = st.text_input("Nama Vendor", placeholder="Ketik vendor lalu tekan Tab...")
     with col2:
         tanggal_input = st.date_input("Tanggal", value=datetime.date.today())
-        # Kita pakai default 0 agar tidak terbaca None saat di-Enter cepat
-        jumlah_input = st.number_input(
+        # FIX: Menggunakan value=None agar tidak muncul angka 0 yang harus dihapus
+        jumlah = st.number_input(
             "Jumlah (Nominal)", 
             min_value=0, 
-            step=1000,
-            value=0
+            step=1000, 
+            value=None, 
+            placeholder="Masukkan nominal..."
         )
     
-    submit = st.form_submit_button("Simpan ke Cloud 🚀")
+    submit = st.form_submit_button("Simpan ke Database")
 
-# --- 5. LOGIKA SIMPAN (ANTI-ERROR ENTER) ---
+# --- 5. LOGIKA SIMPAN ---
 if submit:
-    # Cek vendor tidak kosong dan jumlah lebih dari 0
-    if vendor.strip() != "" and jumlah_input > 0:
+    if vendor and (jumlah is not None):
         try:
             target_uraian = "Karcis Parkir Kendaraan Operasional"
             if uraian_pilih == target_uraian:
@@ -68,7 +68,7 @@ if submit:
                     match = df_cek[(df_cek['t_dt'].dt.month == bln) & (df_cek['t_dt'].dt.year == thn)]
                     if not match.empty:
                         id_old = int(match.iloc[0]['id'])
-                        new_amt = int(match.iloc[0]['jumlah'] + jumlah_input)
+                        new_amt = int(match.iloc[0]['jumlah'] + jumlah)
                         conn.table("kas_kecil").delete().eq("id", id_old).execute()
                         conn.table("kas_kecil").insert({
                             "uraian": target_uraian, "vendor": vendor, 
@@ -76,9 +76,9 @@ if submit:
                         }).execute()
                         found = True
                 if not found:
-                    conn.table("kas_kecil").insert({"uraian": target_uraian, "vendor": vendor, "tanggal": str(tanggal_input), "jumlah": int(jumlah_input)}).execute()
+                    conn.table("kas_kecil").insert({"uraian": target_uraian, "vendor": vendor, "tanggal": str(tanggal_input), "jumlah": int(jumlah)}).execute()
             else:
-                conn.table("kas_kecil").insert({"uraian": uraian_pilih, "vendor": vendor, "tanggal": str(tanggal_input), "jumlah": int(jumlah_input)}).execute()
+                conn.table("kas_kecil").insert({"uraian": uraian_pilih, "vendor": vendor, "tanggal": str(tanggal_input), "jumlah": int(jumlah)}).execute()
             
             st.success("Data Berhasil Disimpan!")
             time.sleep(1)
@@ -86,8 +86,7 @@ if submit:
         except Exception as e:
             st.error(f"Gagal: {e}")
     else:
-        # Pesan ini muncul kalau beneran kosong atau jumlahnya masih 0
-        st.warning("Pastikan Nama Vendor sudah diisi dan Jumlah lebih dari 0!")
+        st.warning("Mohon isi Nama Vendor dan Jumlah!")
 
 # --- 6. REKAPITULASI ---
 st.divider()
@@ -195,7 +194,7 @@ if not df_raw.empty:
                 t = "" if r.uraian == "Karcis Parkir Kendaraan Operasional" else str(r.tanggal)
                 ws.append([i, f"{i} {r.uraian}", r.vendor, "", "", t, r.jumlah, r.jumlah])
         buf = BytesIO(); wb.save(buf)
-        st.sidebar.download_button("⬇️ Download Excel", buf.getvalue(), "Rekap_Kas Kecil.xlsx")
+        st.sidebar.download_button("⬇️ Download Excel", buf.getvalue(), "Rekap_BIOS.xlsx")
 
 st.sidebar.divider()
 st.sidebar.markdown("### Hapus Keseluruhan Data")
