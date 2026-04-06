@@ -4,6 +4,7 @@ from st_supabase_connection import SupabaseConnection
 from io import BytesIO
 from openpyxl import Workbook
 import datetime
+import time
 
 st.set_page_config(page_title="Aplikasi Kas Kecil", layout="centered")
 st.title("💰 Aplikasi Kas Kecil")
@@ -55,41 +56,30 @@ if submit:
     if vendor and (jumlah is not None):
         try:
             target_uraian = "Karcis Parkir Kendaraan Operasional"
-            
             if uraian_pilih == target_uraian:
                 bulan_pilihan = tanggal_input.month
                 tahun_pilihan = tanggal_input.year
-                
                 res = conn.table("kas_kecil").select("*").eq("uraian", target_uraian).execute()
                 df_cek = pd.DataFrame(res.data)
-                
                 found = False
                 if not df_cek.empty:
                     df_cek['tgl_temp'] = pd.to_datetime(df_cek['tanggal'], errors='coerce')
                     match = df_cek[(df_cek['tgl_temp'].dt.month == bulan_pilihan) & (df_cek['tgl_temp'].dt.year == tahun_pilihan)]
-                    
                     if not match.empty:
                         id_lama = match.iloc[0]['id']
                         jumlah_baru = match.iloc[0]['jumlah'] + jumlah
                         conn.table("kas_kecil").delete().eq("id", id_lama).execute()
-                        
-                        data_update = {
-                            "uraian": target_uraian,
-                            "vendor": vendor,
-                            "tanggal": str(tanggal_input),
-                            "jumlah": int(jumlah_baru)
-                        }
+                        data_update = {"uraian": target_uraian, "vendor": vendor, "tanggal": str(tanggal_input), "jumlah": int(jumlah_baru)}
                         conn.table("kas_kecil").insert(data_update).execute()
                         found = True
-                
                 if not found:
                     data_baru = {"uraian": target_uraian, "vendor": vendor, "tanggal": str(tanggal_input), "jumlah": int(jumlah)}
                     conn.table("kas_kecil").insert(data_baru).execute()
             else:
                 data_normal = {"uraian": uraian_pilih, "vendor": vendor, "tanggal": str(tanggal_input), "jumlah": int(jumlah)}
                 conn.table("kas_kecil").insert(data_normal).execute()
-            
-            st.success("Data Berhasil Diperbarui!")
+            st.success("Data Berhasil Tersimpan!")
+            time.sleep(0.5)
             st.rerun()
         except Exception as e:
             st.error(f"Gagal Simpan: {e}")
@@ -121,7 +111,6 @@ if not df_raw.empty:
         running_total = 0
         mask = (df_raw['temp_year'] == thn) & (df_raw['temp_month'] == bln_num)
         df_bulan = df_raw[mask].sort_values('id')
-        
         for idx, row in df_bulan.iterrows():
             if running_total + row['jumlah'] > LIMIT_KAS:
                 current_batch += 1
@@ -131,7 +120,7 @@ if not df_raw.empty:
             label = f"{nama_bulan_id[int(bln_num)]} ({current_batch}) {int(thn)}"
             df_raw.at[idx, 'Kelompok_Sheet'] = label
 
-    # --- TAMPILKAN EXPANDER (AUTO-SAVE) ---
+    # --- TAMPILKAN EXPANDER (AUTO-SAVE STABIL) ---
     list_kelompok = [k for k in df_raw['Kelompok_Sheet'].unique() if k != ""][::-1]
 
     for kelompok in list_kelompok:
@@ -143,9 +132,12 @@ if not df_raw.empty:
             df_edit = df_group[['id', 'uraian', 'vendor', 'tanggal_dt', 'jumlah']].copy()
             df_edit.columns = ['id', 'uraian', 'vendor', 'tanggal', 'jumlah']
             
+            # Key unik per tabel
+            editor_key = f"editor_{kelompok}"
+            
             edited_data = st.data_editor(
                 df_edit,
-                key=f"editor_{kelompok}",
+                key=editor_key,
                 num_rows="dynamic",
                 use_container_width=True,
                 column_config={
@@ -156,28 +148,34 @@ if not df_raw.empty:
                 }
             )
 
-            # --- LOGIKA AUTO-SAVE ---
+            # LOGIKA UPDATE OTOMATIS
             if not edited_data.equals(df_edit):
                 try:
+                    # 1. Hapus Baris
                     ids_asli = set(df_edit['id'].tolist())
                     ids_sekarang = set(edited_data['id'].dropna().tolist())
                     ids_dihapus = ids_asli - ids_sekarang
-                    
                     for d_id in ids_dihapus:
                         conn.table("kas_kecil").delete().eq("id", d_id).execute()
                     
-                    for index, row_baru in edited_data.iterrows():
+                    # 2. Update Baris
+                    for i, row_baru in edited_data.iterrows():
                         if pd.notna(row_baru['id']):
+                            # Ambil data lama dari df_edit berdasarkan ID
                             row_lama = df_edit[df_edit['id'] == row_baru['id']].iloc[0]
                             if not row_baru.equals(row_lama):
                                 conn.table("kas_kecil").update({
-                                    "uraian": row_baru['uraian'], "vendor": row_baru['vendor'],
-                                    "tanggal": str(row_baru['tanggal']), "jumlah": int(row_baru['jumlah'])
+                                    "uraian": row_baru['uraian'], 
+                                    "vendor": row_baru['vendor'],
+                                    "tanggal": str(row_baru['tanggal']), 
+                                    "jumlah": int(row_baru['jumlah'])
                                 }).eq("id", row_baru['id']).execute()
-                    st.toast("Perubahan disimpan!", icon="✅")
+                    
+                    st.toast("Berhasil diperbarui!", icon="✅")
+                    time.sleep(0.5) # Kasih napas buat database
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Gagal simpan otomatis: {e}")
+                    st.error(f"Error Sinkron: {e}")
 else:
     st.info("Belum ada data.")
 
