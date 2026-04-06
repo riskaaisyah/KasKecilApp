@@ -120,7 +120,7 @@ if not df_raw.empty:
             label = f"{nama_bulan_id[int(bln_num)]} ({current_batch}) {int(thn)}"
             df_raw.at[idx, 'Kelompok_Sheet'] = label
 
-    # --- TAMPILKAN EXPANDER (AUTO-SAVE STABIL) ---
+    # --- 3. TAMPILKAN EXPANDER (FIX PERMANEN: DATA EDITOR STATE) ---
     list_kelompok = [k for k in df_raw['Kelompok_Sheet'].unique() if k != ""][::-1]
 
     for kelompok in list_kelompok:
@@ -129,55 +129,72 @@ if not df_raw.empty:
         sisa_kuota = LIMIT_KAS - total_group
         
         with st.expander(f"📂 {kelompok} | Total: Rp {total_group:,.0f} | 💰 Sisa: Rp {sisa_kuota:,.0f}".replace(",", "."), expanded=True):
-            df_edit = df_group[['id', 'uraian', 'vendor', 'tanggal_dt', 'jumlah']].copy()
-            df_edit.columns = ['id', 'uraian', 'vendor', 'tanggal', 'jumlah']
             
-            # Key unik per tabel
-            editor_key = f"editor_{kelompok}"
+            # Siapkan data dasar
+            df_display = df_group[['id', 'uraian', 'vendor', 'tanggal_dt', 'jumlah']].copy()
+            df_display.columns = ['id', 'uraian', 'vendor', 'tanggal', 'jumlah']
             
-            edited_data = st.data_editor(
-                df_edit,
-                key=editor_key,
+            # Gunakan data_editor dengan penanganan perubahan yang lebih detail
+            edited_dict = st.data_editor(
+                df_display,
+                key=f"editor_{kelompok}",
                 num_rows="dynamic",
                 use_container_width=True,
                 column_config={
-                    "id": None,
+                    "id": None, # ID tetap sembunyi
                     "uraian": st.column_config.SelectboxColumn("Uraian", options=opsi_uraian),
                     "tanggal": st.column_config.DateColumn("Tanggal"),
                     "jumlah": st.column_config.NumberColumn("Jumlah", format="%d")
                 }
             )
 
-            # LOGIKA UPDATE OTOMATIS
-            if not edited_data.equals(df_edit):
+            # --- LOGIKA SINKRONISASI MANUAL (LEBIH AMAN) ---
+            # Kita bandingkan edited_dict (hasil edit) dengan df_display (data asli dari DB)
+            if not edited_dict.equals(df_display):
+                # 1. Identifikasi Baris yang Dihapus
+                ids_asli = set(df_display['id'].tolist())
+                ids_sekarang = set(edited_dict['id'].dropna().tolist())
+                ids_dihapus = ids_asli - ids_sekarang
+                
+                # 2. Jalankan Proses Update ke Supabase
                 try:
-                    # 1. Hapus Baris
-                    ids_asli = set(df_edit['id'].tolist())
-                    ids_sekarang = set(edited_data['id'].dropna().tolist())
-                    ids_dihapus = ids_asli - ids_sekarang
+                    # Proses Hapus
                     for d_id in ids_dihapus:
                         conn.table("kas_kecil").delete().eq("id", d_id).execute()
                     
-                    # 2. Update Baris
-                    for i, row_baru in edited_data.iterrows():
-                        if pd.notna(row_baru['id']):
-                            # Ambil data lama dari df_edit berdasarkan ID
-                            row_lama = df_edit[df_edit['id'] == row_baru['id']].iloc[0]
-                            if not row_baru.equals(row_lama):
+                    # Proses Update Baris yang Ada
+                    for index, row in edited_dict.iterrows():
+                        row_id = row['id']
+                        
+                        # Jika baris memiliki ID (artinya ini baris lama yang diedit)
+                        if pd.notna(row_id):
+                            # Ambil data asli untuk dicek perubahannya
+                            original_row = df_display[df_display['id'] == row_id].iloc[0]
+                            
+                            # Jika ada perbedaan data, lakukan UPDATE
+                            if not row.equals(original_row):
                                 conn.table("kas_kecil").update({
-                                    "uraian": row_baru['uraian'], 
-                                    "vendor": row_baru['vendor'],
-                                    "tanggal": str(row_baru['tanggal']), 
-                                    "jumlah": int(row_baru['jumlah'])
-                                }).eq("id", row_baru['id']).execute()
-                    
-                    st.toast("Berhasil diperbarui!", icon="✅")
-                    time.sleep(0.5) # Kasih napas buat database
+                                    "uraian": row['uraian'],
+                                    "vendor": row['vendor'],
+                                    "tanggal": str(row['tanggal']),
+                                    "jumlah": int(row['jumlah'])
+                                }).eq("id", int(row_id)).execute()
+                        
+                        # Jika baris TIDAK memiliki ID (artinya ini baris baru yang ditambahkan di editor)
+                        else:
+                            if row['vendor'] and row['jumlah'] > 0:
+                                conn.table("kas_kecil").insert({
+                                    "uraian": row['uraian'],
+                                    "vendor": row['vendor'],
+                                    "tanggal": str(row['tanggal']),
+                                    "jumlah": int(row['jumlah'])
+                                }).execute()
+
+                    st.toast("Data Berhasil Disinkronkan!", icon="✅")
+                    time.sleep(1) # Jeda agar database selesai menulis
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Error Sinkron: {e}")
-else:
-    st.info("Belum ada data.")
+                    st.error(f"Gagal Sinkronisasi: {e}")
 
 # --- SIDEBAR ---
 st.sidebar.markdown("### 💾 Simpan Rekap Kas Kecil")
