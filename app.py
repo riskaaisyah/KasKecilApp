@@ -104,6 +104,7 @@ df_raw = fetch_data()
 
 if not df_raw.empty:
     LIMIT_KAS = 25_000_000
+    # KUNCI PERBAIKAN: Pastikan kolom tanggal benar-benar jadi tipe Date objek sebelum masuk editor
     df_raw['tanggal_dt'] = pd.to_datetime(df_raw['tanggal'], errors='coerce')
     df_raw = df_raw.sort_values('id')
     
@@ -139,12 +140,10 @@ if not df_raw.empty:
         sisa_kuota = LIMIT_KAS - total_group
         
         with st.expander(f"📂 {kelompok} | Total: Rp {total_group:,.0f} | 💰 Sisa: Rp {sisa_kuota:,.0f}".replace(",", "."), expanded=True):
-            # No & Uraian Gabungan untuk TAMPILAN
-            df_group['No'] = range(1, len(df_group) + 1)
-            df_group['Uraian_Tampil'] = df_group.apply(lambda x: f"{x['No']} {x['uraian']}", axis=1)
-            
-            # Data yang diedit (Pakai uraian asli biar gak error Selectbox)
-            df_edit = df_group[['id', 'uraian', 'vendor', 'tanggal', 'jumlah']].copy()
+            # Data yang diedit (Pastikan kolom tanggal sudah jadi datetime objek)
+            df_edit = df_group[['id', 'uraian', 'vendor', 'tanggal_dt', 'jumlah']].copy()
+            # Rename biar judul kolom di tabel bagus
+            df_edit.columns = ['id', 'uraian', 'vendor', 'tanggal', 'jumlah']
             
             edited_df = st.data_editor(
                 df_edit,
@@ -153,7 +152,7 @@ if not df_raw.empty:
                 use_container_width=True,
                 column_config={
                     "id": None,
-                    "uraian": st.column_config.SelectboxColumn("Uraian", options=opsi_uraian, width="medium"),
+                    "uraian": st.column_config.SelectboxColumn("Uraian", options=opsi_uraian),
                     "vendor": "Vendor",
                     "tanggal": st.column_config.DateColumn("Tanggal"),
                     "jumlah": st.column_config.NumberColumn("Jumlah", format="%d")
@@ -163,6 +162,7 @@ if not df_raw.empty:
             if st.button(f"💾 Simpan Perubahan {kelompok}", key=f"btn_{kelompok}"):
                 try:
                     ids_asli = set(df_edit['id'].tolist())
+                    # filter pd.notna untuk id agar tidak error baris baru
                     ids_sekarang = set(edited_df['id'].dropna().tolist())
                     ids_dihapus = ids_asli - ids_sekarang
                     
@@ -173,7 +173,8 @@ if not df_raw.empty:
                         if pd.notna(r['id']):
                             conn.table("kas_kecil").update({
                                 "uraian": r['uraian'], "vendor": r['vendor'],
-                                "tanggal": str(r['tanggal']), "jumlah": int(r['jumlah'])
+                                "tanggal": str(r['tanggal'].date()) if hasattr(r['tanggal'], 'date') else str(r['tanggal']), 
+                                "jumlah": int(r['jumlah'])
                             }).eq("id", r['id']).execute()
                     st.success("Tersimpan!")
                     st.rerun()
@@ -210,8 +211,13 @@ if not df_raw.empty:
 
             df_b = df_raw[df_raw['Kelompok_Sheet'] == p]
             for i, row in enumerate(df_b.itertuples(), 1):
-                tgl = "" if row.uraian == "Karcis Parkir Kendaraan Operasional" else row.tanggal
+                # Sembunyikan tanggal excel jika karcis
+                tgl = "" if row.uraian == "Karcis Parkir Kendaraan Operasional" else str(row.tanggal)
                 ws.append([i, f"{i} {row.uraian}", row.vendor, "", "", tgl, row.jumlah, row.jumlah])
+                for cell in ws[ws.max_row]:
+                    cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+                    if isinstance(cell.value, (int, float)):
+                        cell.number_format = '#,##0'
             
         buf = BytesIO()
         wb.save(buf)
