@@ -72,77 +72,75 @@ if submit:
 
 # --- REKAPITULASI ---
 st.divider()
-st.subheader("📋 Rekapitulasi Kas")
+st.subheader("📋 Rekapitulasi Kas (Limit 25jt/Sheet)")
 
-df_raw = fetch_data()
+LIMIT_KAS = 25_000_000
 
 if not df_raw.empty:
-    df_raw['tanggal_dt'] = pd.to_datetime(df_raw['tanggal'], errors='coerce')
-    df_raw = df_raw.dropna(subset=['tanggal_dt'])
+    df_raw['tanggal_dt'] = pd.to_datetime(df_raw['tanggal'])
+    # Urutkan dari yang paling lama ke terbaru agar perhitungan batch-nya benar
+    df_raw = df_raw.sort_values('tanggal_dt')
     
-    nama_bulan_id = {
-        1: "JANUARI", 2: "FEBRUARI", 3: "MARET", 4: "APRIL", 5: "MEI", 6: "JUNI",
-        7: "JULI", 8: "AGUSTUS", 9: "SEPTEMBER", 10: "OKTOBER", 11: "NOVEMBER", 12: "DESEMBER"
-    }
-    df_raw['Bulan_Nama'] = df_raw['tanggal_dt'].dt.month.map(nama_bulan_id)
-    df_raw['Tahun'] = df_raw['tanggal_dt'].dt.year
-    
-    list_periode = df_raw.sort_values('tanggal_dt', ascending=False)[['Bulan_Nama', 'Tahun']].drop_duplicates()
+    nama_bulan_id = {1: "JANUARI", 2: "FEBRUARI", 3: "MARET", 4: "APRIL", 5: "MEI", 6: "JUNI", 
+                     7: "JULI", 8: "AGUSTUS", 9: "SEPTEMBER", 10: "OKTOBER", 11: "NOVEMBER", 12: "DESEMBER"}
 
-    for _, row in list_periode.iterrows():
-        bln = row['Bulan_Nama']
-        thn = row['Tahun']
+    # --- LOGIKA BATCHING (Pemisah 25 Juta) ---
+    current_batch = 1
+    running_total = 0
+    batch_list = []
+
+    for index, row in df_raw.iterrows():
+        if running_total + row['jumlah'] > LIMIT_KAS:
+            current_batch += 1
+            running_total = row['jumlah'] # Reset hitungan ke nominal sekarang
+        else:
+            running_total += row['jumlah']
         
-        mask = (df_raw['Bulan_Nama'] == bln) & (df_raw['Tahun'] == thn)
-        df_periode = df_raw[mask].copy()
-        total_bulan = df_periode['jumlah'].sum()
+        bln_thn = f"{nama_bulan_id[row['tanggal_dt'].month]} {current_batch} {row['tanggal_dt'].year}"
+        batch_list.append(bln_thn)
+
+    df_raw['Kelompok_Sheet'] = batch_list
+
+    # Tampilkan terbalik (Bulan terbaru di atas)
+    list_kelompok = df_raw['Kelompok_Sheet'].unique()[::-1]
+
+    for kelompok in list_kelompok:
+        df_group = df_raw[df_raw['Kelompok_Sheet'] == kelompok].copy()
+        total_group = df_group['jumlah'].sum()
         
-        with st.expander(f"📂 Data {bln} {thn} (Total: Rp {total_bulan:,.0f})".replace(",", "."), expanded=True):
-            df_periode = df_periode.sort_values('id')
-            df_periode['No'] = range(1, len(df_periode) + 1)
-            df_periode['Uraian_Tampil'] = df_periode.apply(lambda x: f"{x['No']} {x['uraian']}", axis=1)
+        with st.expander(f"📂 Data {kelompok} (Total: Rp {total_group:,.0f})".replace(",", "."), expanded=True):
+            df_group['No'] = range(1, len(df_group) + 1)
+            df_group['Uraian_Tampil'] = df_group.apply(lambda x: f"{x['No']} {x['uraian']}", axis=1)
             
-            df_display = df_periode[['No', 'Uraian_Tampil', 'vendor', 'tanggal', 'jumlah']].copy()
+            df_display = df_group[['No', 'Uraian_Tampil', 'vendor', 'tanggal', 'jumlah']].copy()
             df_display.columns = ['No', 'Uraian', 'Vendor', 'Tanggal', 'Jumlah']
             
+            # Formatting untuk tampilan
             df_style = df_display.copy()
             df_style['Jumlah'] = df_style['Jumlah'].apply(lambda x: f"{x:,.0f}".replace(",", "."))
-            
-            st.data_editor(df_style, use_container_width=True, key=f"table_{bln}_{thn}")
-else:
-    st.info("Belum ada data yang tersimpan di Cloud Database.")
+            st.data_editor(df_style, use_container_width=True, key=f"table_{kelompok}")
 
-# --- DOWNLOAD EXCEL PRO (MULTI-SHEET & FORMATTING) ---
+# --- DOWNLOAD EXCEL ---
 if not df_raw.empty:
-    if st.sidebar.button("💾 Siapkan Excel Format Kantor"):
+    if st.sidebar.button("💾 Siapkan Excel Format BIOS"):
         from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+        from openpyxl import Workbook
         
         wb = Workbook()
-        # Hapus sheet default
-        std_sheet = wb.get_sheet_by_name('Sheet')
-        wb.remove_sheet(std_sheet)
+        del wb['Sheet'] # Hapus sheet bawaan yang kosong
 
-        # 1. Ambil data dan siapkan periode
-        df_raw['tanggal_dt'] = pd.to_datetime(df_raw['tanggal'])
-        nama_bulan_id = {
-            1: "JANUARI", 2: "FEBRUARI", 3: "MARET", 4: "APRIL", 5: "MEI", 6: "JUNI",
-            7: "JULI", 8: "AGUSTUS", 9: "SEPTEMBER", 10: "OKTOBER", 11: "NOVEMBER", 12: "DESEMBER"
-        }
-        df_raw['Bulan_Tahun'] = df_raw['tanggal_dt'].dt.month.map(nama_bulan_id) + " " + df_raw['tanggal_dt'].dt.year.astype(str)
-        
-        periodes = df_raw['Bulan_Tahun'].unique()
-
-        # Warna untuk Header (Tosca seperti di gambar)
-        header_fill = PatternFill(start_color="00FFFF", end_color="00FFFF", fill_type="solid")
-        title_fill = PatternFill(start_color="CC9900", end_color="CC9900", fill_type="solid") # Warna cokelat/emas judul
+        # Warna & Style (Sesuai Gambar 2 yang kamu mau)
+        header_fill = PatternFill(start_color="00FFFF", end_color="00FFFF", fill_type="solid") # Tosca
+        title_fill = PatternFill(start_color="CC9900", end_color="CC9900", fill_type="solid")  # Cokelat Judul
         thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), 
                              top=Side(style='thin'), bottom=Side(style='thin'))
 
-        for p in periodes:
-            # Buat Sheet baru untuk setiap bulan
-            ws = wb.create_sheet(title=p)
+        # Kita gunakan 'Kelompok_Sheet' yang sudah dibuat di bagian Rekapitulasi
+        # Setiap kelompok (Januari 1, Januari 2, dst) akan jadi satu Sheet
+        for kelompok in df_raw['Kelompok_Sheet'].unique():
+            ws = wb.create_sheet(title=kelompok)
             
-            # --- BAGIAN JUDUL (Baris 1-4) ---
+            # 1. Judul Besar (Merge Cell B2:I3)
             ws.merge_cells('B2:I3')
             cell_judul = ws['B2']
             cell_judul.value = "APLIKASI BIOS (BIAYA OPERASIONAL)"
@@ -150,13 +148,14 @@ if not df_raw.empty:
             cell_judul.alignment = Alignment(horizontal="center", vertical="center")
             cell_judul.fill = title_fill
 
+            # 2. Sub-judul Nota Dinas (Baris 5)
             ws['A5'] = "PERTANGGUNGJAWABAN ATAS ND PENGAJUAN NOMOR KU.02.04/19/11/1/PBLU/PBLU-25"
             ws['A5'].font = Font(bold=True, size=10)
 
-            # --- HEADER TABEL (Baris 7) ---
+            # 3. Header Tabel (Baris 7)
             headers = ["No", "URAIAN", "NAMA VENDOR", "POS MATA ANGGARAN", "GL ACCOUNT", "TANGGAL TRANSAKSI", "JUMLAH PENGGUNAAN", "SETELAH PPN"]
             ws.append([]) # Baris kosong 6
-            ws.append(headers)
+            ws.append(headers) # Baris 7
             
             for cell in ws[7]:
                 cell.fill = header_fill
@@ -164,41 +163,42 @@ if not df_raw.empty:
                 cell.alignment = Alignment(horizontal="center", vertical="center")
                 cell.border = thin_border
 
-            # --- ISI DATA ---
-            df_bulan = df_raw[df_raw['Bulan_Tahun'] == p].sort_values('tanggal_dt')
-            for i, row in enumerate(df_bulan.values, 1):
-                # Format: No, Uraian, Vendor, Pos (kosong), GL (kosong), Tanggal, Jumlah, Jumlah (PPN)
+            # 4. Isi Data Khusus Batch Ini
+            df_batch = df_raw[df_raw['Kelompok_Sheet'] == kelompok]
+            for i, row in enumerate(df_batch.values, 1):
+                # row[1]=uraian, row[2]=vendor, row[3]=tanggal, row[4]=jumlah
                 baris_data = [
                     i, 
                     f"{i} {row[1]}", 
                     row[2], 
-                    "", # Pos Mata Anggaran (kosong dulu)
-                    "", # GL Account (kosong dulu)
+                    "", # Pos Mata Anggaran (kosong)
+                    "", # GL Account (kosong)
                     row[3], 
                     row[4], 
                     row[4]
                 ]
                 ws.append(baris_data)
                 
-                # Tambah border ke setiap sel data
+                # Tambah border & format ribuan
                 for cell in ws[ws.max_row]:
                     cell.border = thin_border
                     if isinstance(cell.value, (int, float)):
                         cell.number_format = '#,##0'
 
-            # Atur Lebar Kolom
-            ws.column_dimensions['B'].width = 30
+            # 5. Atur Lebar Kolom agar rapi
+            ws.column_dimensions['B'].width = 35
             ws.column_dimensions['C'].width = 25
             ws.column_dimensions['F'].width = 20
             ws.column_dimensions['G'].width = 18
+            ws.column_dimensions['H'].width = 18
 
         # Simpan ke Buffer
         buf = BytesIO()
         wb.save(buf)
-        st.sidebar.success(f"Berhasil memproses {len(periodes)} bulan!")
+        st.sidebar.success(f"Siap! Terbagi jadi {len(df_raw['Kelompok_Sheet'].unique())} Sheet.")
         st.sidebar.download_button(
-            label="⬇️ Download Excel Pro",
+            label="⬇️ Download Excel Multi-Sheet",
             data=buf.getvalue(),
-            file_name=f"Rekap_BIOS_{datetime.date.today()}.xlsx",
+            file_name=f"Rekap_BIOS_Limit_{datetime.date.today()}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
