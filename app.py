@@ -112,18 +112,93 @@ if not df_raw.empty:
 else:
     st.info("Belum ada data yang tersimpan di Cloud Database.")
 
-# --- DOWNLOAD EXCEL ---
+# --- DOWNLOAD EXCEL PRO (MULTI-SHEET & FORMATTING) ---
 if not df_raw.empty:
-    if st.sidebar.button("💾 Siapkan Excel Semua Data"):
+    if st.sidebar.button("💾 Siapkan Excel Format Kantor"):
+        from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+        
         wb = Workbook()
-        ws = wb.active
-        ws.title = "Semua Rekap"
-        ws.append(["No", "Uraian", "Vendor", "Tanggal", "Jumlah"])
+        # Hapus sheet default
+        std_sheet = wb.get_sheet_by_name('Sheet')
+        wb.remove_sheet(std_sheet)
+
+        # 1. Ambil data dan siapkan periode
+        df_raw['tanggal_dt'] = pd.to_datetime(df_raw['tanggal'])
+        nama_bulan_id = {
+            1: "JANUARI", 2: "FEBRUARI", 3: "MARET", 4: "APRIL", 5: "MEI", 6: "JUNI",
+            7: "JULI", 8: "AGUSTUS", 9: "SEPTEMBER", 10: "OKTOBER", 11: "NOVEMBER", 12: "DESEMBER"
+        }
+        df_raw['Bulan_Tahun'] = df_raw['tanggal_dt'].dt.month.map(nama_bulan_id) + " " + df_raw['tanggal_dt'].dt.year.astype(str)
         
-        for i, r in enumerate(df_raw.sort_values('tanggal_dt').values, 1):
-            # r[1] = uraian, r[2] = vendor, r[3] = tanggal, r[4] = jumlah
-            ws.append([i, f"{i} {r[1]}", r[2], r[3], r[4]])
-        
+        periodes = df_raw['Bulan_Tahun'].unique()
+
+        # Warna untuk Header (Tosca seperti di gambar)
+        header_fill = PatternFill(start_color="00FFFF", end_color="00FFFF", fill_type="solid")
+        title_fill = PatternFill(start_color="CC9900", end_color="CC9900", fill_type="solid") # Warna cokelat/emas judul
+        thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), 
+                             top=Side(style='thin'), bottom=Side(style='thin'))
+
+        for p in periodes:
+            # Buat Sheet baru untuk setiap bulan
+            ws = wb.create_sheet(title=p)
+            
+            # --- BAGIAN JUDUL (Baris 1-4) ---
+            ws.merge_cells('B2:I3')
+            cell_judul = ws['B2']
+            cell_judul.value = "APLIKASI BIOS (BIAYA OPERASIONAL)"
+            cell_judul.font = Font(bold=True, color="FFFFFF", size=14)
+            cell_judul.alignment = Alignment(horizontal="center", vertical="center")
+            cell_judul.fill = title_fill
+
+            ws['A5'] = "PERTANGGUNGJAWABAN ATAS ND PENGAJUAN NOMOR KU.02.04/19/11/1/PBLU/PBLU-25"
+            ws['A5'].font = Font(bold=True, size=10)
+
+            # --- HEADER TABEL (Baris 7) ---
+            headers = ["No", "URAIAN", "NAMA VENDOR", "POS MATA ANGGARAN", "GL ACCOUNT", "TANGGAL TRANSAKSI", "JUMLAH PENGGUNAAN", "SETELAH PPN"]
+            ws.append([]) # Baris kosong 6
+            ws.append(headers)
+            
+            for cell in ws[7]:
+                cell.fill = header_fill
+                cell.font = Font(bold=True)
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+                cell.border = thin_border
+
+            # --- ISI DATA ---
+            df_bulan = df_raw[df_raw['Bulan_Tahun'] == p].sort_values('tanggal_dt')
+            for i, row in enumerate(df_bulan.values, 1):
+                # Format: No, Uraian, Vendor, Pos (kosong), GL (kosong), Tanggal, Jumlah, Jumlah (PPN)
+                baris_data = [
+                    i, 
+                    f"{i} {row[1]}", 
+                    row[2], 
+                    "", # Pos Mata Anggaran (kosong dulu)
+                    "", # GL Account (kosong dulu)
+                    row[3], 
+                    row[4], 
+                    row[4]
+                ]
+                ws.append(baris_data)
+                
+                # Tambah border ke setiap sel data
+                for cell in ws[ws.max_row]:
+                    cell.border = thin_border
+                    if isinstance(cell.value, (int, float)):
+                        cell.number_format = '#,##0'
+
+            # Atur Lebar Kolom
+            ws.column_dimensions['B'].width = 30
+            ws.column_dimensions['C'].width = 25
+            ws.column_dimensions['F'].width = 20
+            ws.column_dimensions['G'].width = 18
+
+        # Simpan ke Buffer
         buf = BytesIO()
         wb.save(buf)
-        st.sidebar.download_button("⬇️ Download Excel", buf.getvalue(), "Rekap_Kas_Kecil.xlsx")
+        st.sidebar.success(f"Berhasil memproses {len(periodes)} bulan!")
+        st.sidebar.download_button(
+            label="⬇️ Download Excel Pro",
+            data=buf.getvalue(),
+            file_name=f"Rekap_BIOS_{datetime.date.today()}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
