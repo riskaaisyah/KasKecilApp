@@ -70,25 +70,6 @@ if submit:
     else:
         st.warning("Mohon isi Nama Vendor dan Jumlah dulu ya!")
 
-# --- REKAPITULASI (VERSI FINAL ANTI-ERROR) ---
-st.divider()
-st.subheader("📋 Rekapitulasi Kas (Limit 25jt/Sheet)")
-
-# 1. Pastikan ambil data dulu ke variabel df_raw
-df_raw = fetch_data() 
-
-# 2. Cek apakah datanya ada?
-if not df_raw.empty:
-    LIMIT_KAS = 25_000_000
-    
-    # Olah tanggal agar bisa diurutkan
-    df_raw['tanggal_dt'] = pd.to_datetime(df_raw['tanggal'], errors='coerce')
-    df_raw = df_raw.dropna(subset=['tanggal_dt'])
-    df_raw = df_raw.sort_values('tanggal_dt') # Urutkan kronologis
-    
-    nama_bulan_id = {1: "JANUARI", 2: "FEBRUARI", 3: "MARET", 4: "APRIL", 5: "MEI", 6: "JUNI", 
-                     7: "JULI", 8: "AGUSTUS", 9: "SEPTEMBER", 10: "OKTOBER", 11: "NOVEMBER", 12: "DESEMBER"}
-
     # --- REKAPITULASI (VERSI FINAL: LIMIT 25JT & RESET TIAP BULAN) ---
 st.divider()
 st.subheader("📋 Rekapitulasi Kas (Limit 25jt/Sheet)")
