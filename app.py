@@ -167,8 +167,8 @@ if not df_raw.empty:
                 except Exception as e:
                     st.error(f"Gagal: {e}")
 
-# --- 7. SIDEBAR & DOWNLOAD EXCEL (FIX SESUAI GAMBAR 2) ---
-st.sidebar.markdown("### Simpan Rekap Kas Kecil")
+# --- 7. SIDEBAR & DOWNLOAD EXCEL (FIX WARNA JUDUL & FORMAT TANGGAL) ---
+st.sidebar.markdown("### 💾 Simpan Rekap Kas Kecil")
 if not df_raw.empty:
     if st.sidebar.button("💾 Siapkan Excel Format BIOS"):
         wb = Workbook()
@@ -177,8 +177,8 @@ if not df_raw.empty:
         # Style Definitions
         thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), 
                              top=Side(style='thin'), bottom=Side(style='thin'))
-        header_fill = PatternFill(start_color="00FFFF", end_color="00FFFF", fill_type="solid")
-        title_fill = PatternFill(start_color="CC9900", end_color="CC9900", fill_type="solid")
+        header_fill = PatternFill(start_color="00FFFF", end_color="00FFFF", fill_type="solid") # Biru Muda
+        title_fill = PatternFill(start_color="CC9900", end_color="CC9900", fill_type="solid") # Emas/Cokelat
         bbm_fill = PatternFill(start_color="00FF00", end_color="00FF00", fill_type="solid") # Hijau
         parkir_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid") # Kuning
         total_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
@@ -191,24 +191,22 @@ if not df_raw.empty:
         for p in list_excel:
             ws = wb.create_sheet(title=p[:31])
             
-            # 1. Judul Header Atas
+            # 1. Judul Besar (Baris 2-3)
             ws.merge_cells('B2:I3')
             ws['B2'] = "APLIKASI BIOS (BIAYA OPERASIONAL)"
             ws['B2'].font = Font(bold=True, color="FFFFFF", size=14)
             ws['B2'].alignment = Alignment(horizontal="center", vertical="center")
             ws['B2'].fill = title_fill
 
-            # 2. Header Tabel (Sesuai Gambar 2)
+            # 2. Header Tabel (Baris 5)
             headers = ["No", "URAIAN", "NAMA VENDOR", "POS MATA ANGGARAN", "GL ACCOUNT", 
-                       "TANGGAL TRANSAKSI (SESUAI NOTA)", "JUMLAH PENGGUNAAN", "SETELAH PPN", "PPN"]
-            ws.append([]) # Baris kosong pembatas
-            ws.append([]) # Baris kosong pembatas
-            ws.append(headers)
-            header_row = 6 # Header ada di baris ke-6
-
+                       "TANGGAL TRANSAKSI", "JUMLAH PENGGUNAAN", "SETELAH PPN", "PPN"]
+            
+            header_row = 5
             for col_num, cell_val in enumerate(headers, 1):
                 cell = ws.cell(row=header_row, column=col_num)
-                cell.fill = header_fill
+                cell.value = cell_val
+                cell.fill = header_fill # WARNA BIRU DI SINI
                 cell.font = Font(bold=True, size=10)
                 cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
                 cell.border = thin_border
@@ -218,33 +216,46 @@ if not df_raw.empty:
             current_row = header_row + 1
             
             for i, r in enumerate(df_b.itertuples(), 1):
-                tgl = "" if r.uraian == "Karcis Parkir Kendaraan Operasional" else str(r.tanggal)
-                row_data = [i, f"{i} {r.uraian}", r.vendor, "", "", tgl, r.jumlah, r.jumlah, ""]
-                ws.append(row_data)
+                # FIX FORMAT TANGGAL: Tanggal/Bulan/Tahun
+                if r.uraian == "Karcis Parkir Kendaraan Operasional":
+                    tgl_indo = ""
+                else:
+                    # Mengubah '2026-05-12' jadi '12/05/2026'
+                    tgl_indo = pd.to_datetime(r.tanggal).strftime('%d/%m/%Y')
                 
-                # Tentukan Warna berdasarkan Uraian
+                row_data = [i, f"{i} {r.uraian}", r.vendor, "", "", tgl_indo, r.jumlah, r.jumlah, ""]
+                ws.append(row_data) # Ini akan mengisi baris current_row
+                
+                # Warna Otomatis
                 current_fill = None
                 if "Isi BBM" in r.uraian:
                     current_fill = bbm_fill
                 elif "Karcis Parkir" in r.uraian:
                     current_fill = parkir_fill
                 
-                # Apply Style ke setiap cell dalam baris
+                # Styling tiap sel di baris ini
                 for col_idx in range(1, 10):
                     cell = ws.cell(row=current_row, column=col_idx)
                     cell.border = thin_border
-                    cell.alignment = Alignment(vertical="center")
+                    cell.alignment = Alignment(vertical="center", horizontal="left" if col_idx <= 3 else "center")
                     if current_fill:
                         cell.fill = current_fill
                     
-                    # Format Angka untuk kolom Jumlah & Setelah PPN
+                    # Format Angka (Titik Ribuan)
                     if col_idx in [7, 8]:
                         cell.number_format = '#,##0'
                 
                 current_row += 1
 
-            # 4. Baris Total (Paling Bawah)
-            ws.append(["", "TOTAL", "", "", "", "", f"=SUM(G{header_row+1}:G{current_row-1})", f"=SUM(H{header_row+1}:H{current_row-1})", ""])
+            # 4. Baris Total
+            ws.cell(row=current_row, column=1).border = thin_border
+            ws.cell(row=current_row, column=2).value = "TOTAL"
+            ws.cell(row=current_row, column=2).font = Font(bold=True)
+            
+            # Rumus Sum Otomatis
+            ws.cell(row=current_row, column=7).value = f"=SUM(G{header_row+1}:G{current_row-1})"
+            ws.cell(row=current_row, column=8).value = f"=SUM(H{header_row+1}:H{current_row-1})"
+            
             for col_idx in range(1, 10):
                 cell = ws.cell(row=current_row, column=col_idx)
                 cell.font = Font(bold=True)
@@ -254,10 +265,9 @@ if not df_raw.empty:
                     cell.number_format = '#,##0'
 
             # Setting Lebar Kolom
-            ws.column_dimensions['A'].width = 5
-            ws.column_dimensions['B'].width = 40
+            ws.column_dimensions['B'].width = 45
             ws.column_dimensions['C'].width = 25
-            ws.column_dimensions['F'].width = 18
+            ws.column_dimensions['F'].width = 20
             ws.column_dimensions['G'].width = 15
             ws.column_dimensions['H'].width = 15
 
@@ -265,7 +275,7 @@ if not df_raw.empty:
         st.sidebar.download_button("⬇️ Download Excel BIOS", buf.getvalue(), f"Rekap_BIOS_{datetime.date.today()}.xlsx")
 
 st.sidebar.divider()
-st.sidebar.markdown("### Hapus Keseluruhan Data")
+st.sidebar.markdown("### 🗑️ Hapus Keseluruhan Data")
 konf = st.sidebar.checkbox("Saya Ingin Menghapus Semua Data")
 if st.sidebar.button("🗑️ Kosongkan Data", type="primary", disabled=not konf):
     conn.table("kas_kecil").delete().neq("id", 0).execute()
