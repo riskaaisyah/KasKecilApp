@@ -26,7 +26,7 @@ def fetch_data():
     except Exception:
         return pd.DataFrame(columns=["id", "uraian", "vendor", "tanggal", "jumlah"])
 
-# --- FUNGSI GENERATE EXCEL (BIAR KONSISTEN) ---
+# --- FUNGSI GENERATE EXCEL ---
 def generate_excel(df_to_export, kelompok_names, nama_bulan_id):
     wb = Workbook()
     del wb['Sheet']
@@ -163,26 +163,45 @@ if not df_raw.empty:
             df_disp['Uraian_View'] = df_disp.apply(lambda x: f"{x['No']} {x['uraian']}", axis=1)
             df_disp['Tgl_View'] = df_disp.apply(lambda x: "" if x['uraian'] == "Karcis Parkir Kendaraan Operasional" else x['tanggal'], axis=1)
             
+            # --- TAMPILAN TITIK RIBUAN DAN FITUR HAPUS ---
             df_edit = df_disp[['id', 'No', 'Uraian_View', 'vendor', 'Tgl_View', 'jumlah']].copy()
             df_edit.columns = ['id', 'No', 'Uraian', 'Vendor', 'Tanggal', 'Jumlah']
             
-            # FIX: Format titik ribuan dengan format="Rp %d"
-            edited = st.data_editor(df_edit, key=f"ed_{g}", num_rows="dynamic", use_container_width=True,
-                                    column_config={
-                                        "id": None, 
-                                        "No": st.column_config.NumberColumn(disabled=True), 
-                                        "Jumlah": st.column_config.NumberColumn(format="Rp %d") # Titik muncul di sini
-                                    })
+            edited = st.data_editor(
+                df_edit, 
+                key=f"ed_{g}", 
+                num_rows="dynamic", # Tombol hapus muncul saat baris diklik
+                use_container_width=True,
+                column_config={
+                    "id": None, 
+                    "No": st.column_config.NumberColumn(disabled=True), 
+                    "Jumlah": st.column_config.NumberColumn(
+                        label="Jumlah",
+                        format="Rp %d", # Menampilkan titik ribuan
+                        step=1
+                    )
+                }
+            )
 
             if st.button(f"💾 Simpan Perubahan {g}", key=f"btn_{g}"):
                 try:
-                    ids_old = set(df_edit['id'].tolist()); ids_new = set(edited['id'].dropna().astype(int).tolist())
-                    for d_id in (ids_old - ids_new): conn.table("kas_kecil").delete().eq("id", d_id).execute()
+                    # Logika Hapus Baris
+                    ids_old = set(df_edit['id'].tolist())
+                    ids_new = set(edited['id'].dropna().astype(int).tolist())
+                    deleted_ids = ids_old - ids_new
+                    
+                    for d_id in deleted_ids:
+                        conn.table("kas_kecil").delete().eq("id", d_id).execute()
+                        
+                    # Logika Update Baris
                     for _, row in edited.iterrows():
                         if pd.notna(row['id']):
                             u = row['Uraian'].split(' ', 1)[-1] if ' ' in row['Uraian'] else row['Uraian']
-                            conn.table("kas_kecil").update({"uraian":u, "vendor":row['Vendor'], "tanggal":str(row['Tanggal']), "jumlah":int(row['Jumlah'])}).eq("id", int(row['id'])).execute()
-                    st.success("Berhasil!"); time.sleep(1); st.rerun()
+                            conn.table("kas_kecil").update({
+                                "uraian":u, "vendor":row['Vendor'], 
+                                "tanggal":str(row['Tanggal']), "jumlah":int(row['Jumlah'])
+                            }).eq("id", int(row['id'])).execute()
+                    st.success("Berhasil Update!"); time.sleep(1); st.rerun()
                 except Exception as e: st.error(f"Gagal: {e}")
 
 # --- 6. SIDEBAR ---
