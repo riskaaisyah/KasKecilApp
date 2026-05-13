@@ -33,7 +33,7 @@ opsi_uraian = [
     "Isi BBM Kendaraan Operasional"
 ]
 
-# --- 4. FORM INPUT (NO ZERO & SUPPORT ENTER) ---
+# --- 4. FORM INPUT ---
 with st.form("form_kas", clear_on_submit=True):
     st.subheader("Input Data Transaksi")
     col1, col2 = st.columns(2)
@@ -42,13 +42,7 @@ with st.form("form_kas", clear_on_submit=True):
         vendor = st.text_input("Nama Vendor", placeholder="Ketik vendor lalu tekan Tab...")
     with col2:
         tanggal_input = st.date_input("Tanggal", value=datetime.date.today())
-        jumlah = st.number_input(
-            "Jumlah (Nominal)", 
-            min_value=0, 
-            step=1000, 
-            value=None, 
-            placeholder="Masukkan nominal..."
-        )
+        jumlah = st.number_input("Jumlah (Nominal)", min_value=0, step=1000, value=None, placeholder="Masukkan nominal...")
     
     submit = st.form_submit_button("Simpan ke Cloud 🚀")
 
@@ -144,7 +138,7 @@ if not df_raw.empty:
                     st.success("Berhasil Update!"); time.sleep(1); st.rerun()
                 except Exception as e: st.error(f"Gagal: {e}")
 
-# --- 7. SIDEBAR & DOWNLOAD EXCEL (DITAMBAH RINGKASAN SISA) ---
+# --- 7. SIDEBAR & DOWNLOAD EXCEL (FIX MENYATU & NAMA FILE OTOMATIS) ---
 st.sidebar.markdown("### 💾 Simpan Rekap Kas Kecil")
 if not df_raw.empty:
     all_kelompok = sorted([k for k in df_raw['Kelompok_Sheet'].unique() if k != ""], 
@@ -153,8 +147,8 @@ if not df_raw.empty:
     def buat_excel(df_sel, grp_sel):
         wb = Workbook(); del wb['Sheet']
         thin = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
-        h_fill = PatternFill(start_color="00FFFF", end_color="00FFFF", fill_type="solid") # Biru Muda Header
-        summary_fill = PatternFill(start_color="99CCFF", end_color="99CCFF", fill_type="solid") # Biru Ringkasan Sisa
+        h_fill = PatternFill(start_color="00FFFF", end_color="00FFFF", fill_type="solid")
+        summary_fill = PatternFill(start_color="99CCFF", end_color="99CCFF", fill_type="solid")
         
         for p in grp_sel:
             ws = wb.create_sheet(title=p[:31])
@@ -183,53 +177,47 @@ if not df_raw.empty:
                     if col_idx in [7, 8]: cell.number_format = '#,##0'
                 curr_r += 1
             
-            # TOTAL UTAMA
-            ws.cell(row=curr_r, column=2).value = "TOTAL"; ws.cell(row=curr_r, column=2).font = Font(bold=True)
-            ws.cell(row=curr_r, column=7).value = f"=SUM(G6:G{curr_r-1})"; ws.cell(row=curr_r, column=8).value = f"=SUM(H6:H{curr_r-1})"
-            for col_idx in range(1, 10):
-                cell = ws.cell(row=curr_r, column=col_idx); cell.border = thin; cell.font = Font(bold=True)
-                if col_idx in [7, 8]: cell.number_format = '#,##0'
+            # --- BAGIAN RINGKASAN SISA (MENYATU TANPA BARIS TOTAL LAMA) ---
+            # PENGAJUAN
+            ws.merge_cells(start_row=curr_r, start_column=1, end_row=curr_r, end_column=7)
+            ws.cell(row=curr_r, column=1).value = "PENGAJUAN UANG MUKA"
+            ws.cell(row=curr_r, column=1).alignment = Alignment(horizontal="right")
+            ws.cell(row=curr_r, column=8).value = LIMIT_KAS
             
-            # --- BAGIAN RINGKASAN SISA (SESUAI GAMBAR 2) ---
-            curr_r += 1 # Baris kosong tipis
-            
-            # Baris PENGAJUAN
+            # PENGGUNAAN
             ws.merge_cells(start_row=curr_r+1, start_column=1, end_row=curr_r+1, end_column=7)
-            ws.cell(row=curr_r+1, column=1).value = "PENGAJUAN UANG MUKA"
+            ws.cell(row=curr_r+1, column=1).value = "PENGGUNAAN UANG MUKA"
             ws.cell(row=curr_r+1, column=1).alignment = Alignment(horizontal="right")
-            ws.cell(row=curr_r+1, column=8).value = LIMIT_KAS
+            ws.cell(row=curr_r+1, column=8).value = f"=SUM(G6:G{curr_r-1})"
             
-            # Baris PENGGUNAAN
+            # SISA
             ws.merge_cells(start_row=curr_r+2, start_column=1, end_row=curr_r+2, end_column=7)
-            ws.cell(row=curr_r+2, column=1).value = "PENGGUNAAN UANG MUKA"
+            ws.cell(row=curr_r+2, column=1).value = "SISA UANG MUKA"
             ws.cell(row=curr_r+2, column=1).alignment = Alignment(horizontal="right")
-            ws.cell(row=curr_r+2, column=8).value = f"=G{curr_r-1}" # Ambil dari total belanja
+            ws.cell(row=curr_r+2, column=8).value = f"=H{curr_r}-H{curr_r+1}"
             
-            # Baris SISA
-            ws.merge_cells(start_row=curr_r+3, start_column=1, end_row=curr_r+3, end_column=7)
-            ws.cell(row=curr_r+3, column=1).value = "SISA UANG MUKA"
-            ws.cell(row=curr_r+3, column=1).alignment = Alignment(horizontal="right")
-            ws.cell(row=curr_r+3, column=8).value = f"=H{curr_r+1}-H{curr_r+2}" # Pengajuan - Penggunaan
-            
-            # Style Ringkasan (Biru & Bold)
-            for r_idx in range(curr_r+1, curr_r+4):
+            # Styling Ringkasan
+            for r_idx in range(curr_r, curr_r+3):
                 for c_idx in range(1, 9):
                     cell = ws.cell(row=r_idx, column=c_idx)
-                    cell.fill = summary_fill
-                    cell.font = Font(bold=True)
-                    cell.border = thin
+                    cell.fill = summary_fill; cell.font = Font(bold=True); cell.border = thin
                     if c_idx == 8: cell.number_format = '#,##0'
 
             ws.column_dimensions['B'].width = 45; ws.column_dimensions['F'].width = 20
         buf = BytesIO(); wb.save(buf); return buf.getvalue()
 
+    # DOWNLOAD SEMUA
     if st.sidebar.button("💾 Siapkan Excel (Semua)"):
-        st.sidebar.download_button("⬇️ Download Semua", buat_excel(df_raw, all_kelompok), f"Rekap_Lengkap_{datetime.date.today()}.xlsx")
+        nama_file_all = f"Rekap Kas Kecil 2026 {all_kelompok[-1]}.xlsx"
+        st.sidebar.download_button("⬇️ Download Semua", buat_excel(df_raw, all_kelompok), nama_file_all)
     
     st.sidebar.divider()
+    
+    # DOWNLOAD PER TABEL (NAMA FILE OTOMATIS)
     tabel_pil = st.sidebar.selectbox("Pilih Tabel:", all_kelompok)
     if st.sidebar.button(f"💾 Siapkan Excel {tabel_pil}"):
-        st.sidebar.download_button(f"⬇️ Download {tabel_pil}", buat_excel(df_raw, [tabel_pil]), f"Rekap_{tabel_pil}.xlsx")
+        nama_file_single = f"Rekap Kas Kecil 2026 {tabel_pil}.xlsx"
+        st.sidebar.download_button(f"⬇️ Download {tabel_pil}", buat_excel(df_raw, [tabel_pil]), nama_file_single)
 
 st.sidebar.divider()
 st.sidebar.markdown("### 🗑️ Hapus Keseluruhan Data")
