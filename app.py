@@ -96,114 +96,63 @@ def generate_excel(df_to_export, kelompok_names, nama_bulan_id):
     wb.save(buf)
     return buf.getvalue()
 
-# --- 4. FORM INPUT ---
-opsi_uraian = ["Jamuan Makan Dinas", "Kebutuhan Kantor", "Karcis Parkir Kendaraan Operasional", "Isi BBM Kendaraan Operasional"]
-
+# --- 4. FORM INPUT (OPTIMAL UNTUK ENTER) ---
 with st.form("form_kas", clear_on_submit=True):
     st.subheader("Input Data Transaksi")
-    c1, c2 = st.columns(2)
-    with c1:
+    col1, col2 = st.columns(2)
+    with col1:
         uraian_pilih = st.selectbox("Uraian", opsi_uraian)
-        vendor = st.text_input("Nama Vendor", placeholder="Ketik vendor...")
-    with c2:
+        # Menambahkan placeholder agar lebih jelas
+        vendor = st.text_input("Nama Vendor", placeholder="Ketik vendor lalu Enter...")
+    with col2:
         tanggal_input = st.date_input("Tanggal", value=datetime.date.today())
-        jumlah = st.number_input("Jumlah (Nominal)", min_value=0, step=1000, value=None, placeholder="Masukkan nominal...")
+        # Set value=0 agar tidak 'None' saat di-Enter cepat
+        jumlah = st.number_input(
+            "Jumlah (Nominal)", 
+            min_value=0, 
+            step=1000, 
+            value=0
+        )
+    
+    # Tombol ini secara otomatis menangkap perintah ENTER dari keyboard
     submit = st.form_submit_button("Simpan ke Cloud 🚀")
 
-if submit and vendor and jumlah:
-    try:
-        if uraian_pilih == "Karcis Parkir Kendaraan Operasional":
-            res = conn.table("kas_kecil").select("*").eq("uraian", uraian_pilih).execute()
-            df_cek = pd.DataFrame(res.data)
-            found = False
-            if not df_cek.empty:
-                df_cek['t_dt'] = pd.to_datetime(df_cek['tanggal'])
-                m, y = tanggal_input.month, tanggal_input.year
-                match = df_cek[(df_cek['t_dt'].dt.month == m) & (df_cek['t_dt'].dt.year == y)]
-                if not match.empty:
-                    id_old = int(match.iloc[0]['id'])
-                    new_amt = int(match.iloc[0]['jumlah'] + jumlah)
-                    conn.table("kas_kecil").delete().eq("id", id_old).execute()
-                    conn.table("kas_kecil").insert({"uraian": uraian_pilih, "vendor": vendor, "tanggal": str(tanggal_input), "jumlah": new_amt}).execute()
-                    found = True
-            if not found:
+# --- 5. LOGIKA SIMPAN ---
+if submit:
+    # Validasi agar tidak menyimpan data kosong (terutama jika jumlah masih 0)
+    if vendor.strip() != "" and jumlah > 0:
+        try:
+            target_uraian = "Karcis Parkir Kendaraan Operasional"
+            if uraian_pilih == target_uraian:
+                bln, thn = tanggal_input.month, tanggal_input.year
+                res = conn.table("kas_kecil").select("*").eq("uraian", target_uraian).execute()
+                df_cek = pd.DataFrame(res.data)
+                found = False
+                if not df_cek.empty:
+                    df_cek['t_dt'] = pd.to_datetime(df_cek['tanggal'])
+                    match = df_cek[(df_cek['t_dt'].dt.month == bln) & (df_cek['t_dt'].dt.year == thn)]
+                    if not match.empty:
+                        id_old = int(match.iloc[0]['id'])
+                        new_amt = int(match.iloc[0]['jumlah'] + jumlah)
+                        conn.table("kas_kecil").delete().eq("id", id_old).execute()
+                        conn.table("kas_kecil").insert({
+                            "uraian": target_uraian, "vendor": vendor, 
+                            "tanggal": str(tanggal_input), "jumlah": new_amt
+                        }).execute()
+                        found = True
+                if not found:
+                    conn.table("kas_kecil").insert({"uraian": target_uraian, "vendor": vendor, "tanggal": str(tanggal_input), "jumlah": int(jumlah)}).execute()
+            else:
                 conn.table("kas_kecil").insert({"uraian": uraian_pilih, "vendor": vendor, "tanggal": str(tanggal_input), "jumlah": int(jumlah)}).execute()
-        else:
-            conn.table("kas_kecil").insert({"uraian": uraian_pilih, "vendor": vendor, "tanggal": str(tanggal_input), "jumlah": int(jumlah)}).execute()
-        st.success("Berhasil disimpan!"); time.sleep(1); st.rerun()
-    except Exception as e: st.error(f"Gagal: {e}")
-
-# --- 5. REKAPITULASI & BATCHING ---
-st.divider()
-df_raw = fetch_data()
-nama_bulan_id = {1:"JANUARI", 2:"FEBRUARI", 3:"MARET", 4:"APRIL", 5:"MEI", 6: "JUNI", 7: "JULI", 8: "AGUSTUS", 9: "SEPTEMBER", 10: "OKTOBER", 11: "NOVEMBER", 12: "DESEMBER"}
-
-if not df_raw.empty:
-    LIMIT_KAS = 25_000_000
-    df_raw['tanggal_dt'] = pd.to_datetime(df_raw['tanggal'], errors='coerce')
-    df_raw['Kelompok_Sheet'] = ""
-    for (y, m), group in df_raw.groupby([df_raw['tanggal_dt'].dt.year, df_raw['tanggal_dt'].dt.month]):
-        if pd.isna(m): continue
-        batch, run_total = 1, 0
-        for idx, row in group.sort_values('id').iterrows():
-            if run_total + row['jumlah'] > LIMIT_KAS:
-                batch += 1; run_total = row['jumlah']
-            else: run_total += row['jumlah']
-            df_raw.at[idx, 'Kelompok_Sheet'] = f"{nama_bulan_id[int(m)]} ({batch}) {int(y)}"
-
-    list_kelompok = sorted([k for k in df_raw['Kelompok_Sheet'].unique() if k != ""], 
-                           key=lambda x: (int(x.split(' ')[-1]), list(nama_bulan_id.values()).index(x.split(' ')[0])), reverse=True)
-
-    for g in list_kelompok:
-        df_g = df_raw[df_raw['Kelompok_Sheet'] == g].copy()
-        tot_g = df_g['jumlah'].sum()
-        with st.expander(f"📂 {g} | Total: Rp {tot_g:,.0f} | 💰 Sisa: Rp {LIMIT_KAS-tot_g:,.0f}".replace(",","."), expanded=True):
-            df_disp = df_g.copy()
-            df_disp['No'] = range(1, len(df_disp)+1)
-            df_disp['Uraian_View'] = df_disp.apply(lambda x: f"{x['No']} {x['uraian']}", axis=1)
-            df_disp['Tgl_View'] = df_disp.apply(lambda x: "" if x['uraian'] == "Karcis Parkir Kendaraan Operasional" else x['tanggal'], axis=1)
             
-            # --- TAMPILAN TITIK RIBUAN DAN FITUR HAPUS ---
-            df_edit = df_disp[['id', 'No', 'Uraian_View', 'vendor', 'Tgl_View', 'jumlah']].copy()
-            df_edit.columns = ['id', 'No', 'Uraian', 'Vendor', 'Tanggal', 'Jumlah']
-            
-            edited = st.data_editor(
-                df_edit, 
-                key=f"ed_{g}", 
-                num_rows="dynamic", # Tombol hapus muncul saat baris diklik
-                use_container_width=True,
-                column_config={
-                    "id": None, 
-                    "No": st.column_config.NumberColumn(disabled=True), 
-                    "Jumlah": st.column_config.NumberColumn(
-                        label="Jumlah",
-                        format="Rp %d", # Menampilkan titik ribuan
-                        step=1
-                    )
-                }
-            )
-
-            if st.button(f"💾 Simpan Perubahan {g}", key=f"btn_{g}"):
-                try:
-                    # Logika Hapus Baris
-                    ids_old = set(df_edit['id'].tolist())
-                    ids_new = set(edited['id'].dropna().astype(int).tolist())
-                    deleted_ids = ids_old - ids_new
-                    
-                    for d_id in deleted_ids:
-                        conn.table("kas_kecil").delete().eq("id", d_id).execute()
-                        
-                    # Logika Update Baris
-                    for _, row in edited.iterrows():
-                        if pd.notna(row['id']):
-                            u = row['Uraian'].split(' ', 1)[-1] if ' ' in row['Uraian'] else row['Uraian']
-                            conn.table("kas_kecil").update({
-                                "uraian":u, "vendor":row['Vendor'], 
-                                "tanggal":str(row['Tanggal']), "jumlah":int(row['Jumlah'])
-                            }).eq("id", int(row['id'])).execute()
-                    st.success("Berhasil Update!"); time.sleep(1); st.rerun()
-                except Exception as e: st.error(f"Gagal: {e}")
-
+            st.success("Data Berhasil Disimpan!")
+            time.sleep(0.5) # Jeda lebih singkat agar terasa cepat
+            st.rerun()
+        except Exception as e:
+            st.error(f"Gagal: {e}")
+    else:
+        st.warning("Pastikan Nama Vendor sudah diisi dan Jumlah lebih dari 0!")
+        
 # --- 6. SIDEBAR ---
 st.sidebar.markdown("### 💾 Simpan Rekap Kas Kecil")
 if not df_raw.empty:
