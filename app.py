@@ -33,7 +33,7 @@ opsi_uraian = [
     "Isi BBM Kendaraan Operasional"
 ]
 
-# --- 4. FORM INPUT (BEBAS ANGKA 0 & DUKUNG ENTER) ---
+# --- 4. FORM INPUT ---
 with st.form("form_kas", clear_on_submit=True):
     st.subheader("Input Data Transaksi")
     col1, col2 = st.columns(2)
@@ -42,7 +42,6 @@ with st.form("form_kas", clear_on_submit=True):
         vendor = st.text_input("Nama Vendor", placeholder="Ketik vendor lalu tekan Tab...")
     with col2:
         tanggal_input = st.date_input("Tanggal", value=datetime.date.today())
-        # FIX: Menggunakan value=None agar tidak muncul angka 0 yang harus dihapus
         jumlah = st.number_input(
             "Jumlah (Nominal)", 
             min_value=0, 
@@ -100,7 +99,6 @@ if not df_raw.empty:
     LIMIT_KAS = 25_000_000
     df_raw['tanggal_dt'] = pd.to_datetime(df_raw['tanggal'], errors='coerce')
     
-    # LOGIKA BATCHING
     df_raw['Kelompok_Sheet'] = "" 
     periods = df_raw[['tanggal_dt']].copy()
     periods['m'], periods['y'] = periods['tanggal_dt'].dt.month, periods['tanggal_dt'].dt.year
@@ -119,7 +117,6 @@ if not df_raw.empty:
                 run_total += row['jumlah']
             df_raw.at[idx, 'Kelompok_Sheet'] = f"{nama_bulan_id[int(m)]} ({curr_batch}) {int(y)}"
 
-    # --- URUTAN TAMPILAN: TERBARU DI ATAS ---
     list_kelompok = sorted(
         [k for k in df_raw['Kelompok_Sheet'].unique() if k != ""],
         key=lambda x: (int(x.split(' ')[-1]), list(nama_bulan_id.values()).index(x.split(' ')[0])),
@@ -130,7 +127,6 @@ if not df_raw.empty:
         df_g = df_raw[df_raw['Kelompok_Sheet'] == g].copy()
         tot_g = df_g['jumlah'].sum()
         with st.expander(f"📂 {g} | Total: Rp {tot_g:,.0f} | 💰 Sisa: Rp {LIMIT_KAS-tot_g:,.0f}".replace(",", "."), expanded=True):
-            
             df_display = df_g.copy()
             df_display['No_Urut'] = range(1, len(df_display) + 1)
             df_display['Uraian_View'] = df_display.apply(lambda x: f"{x['No_Urut']} {x['uraian']}", axis=1)
@@ -171,30 +167,102 @@ if not df_raw.empty:
                 except Exception as e:
                     st.error(f"Gagal: {e}")
 
-# --- 7. SIDEBAR ---
+# --- 7. SIDEBAR & DOWNLOAD EXCEL (FIX SESUAI GAMBAR 2) ---
 st.sidebar.markdown("### Simpan Rekap Kas Kecil")
 if not df_raw.empty:
     if st.sidebar.button("💾 Siapkan Excel Format BIOS"):
         wb = Workbook()
         del wb['Sheet']
-        # URUTAN EXCEL: TERLAMA DI DEPAN (Maret -> April)
+        
+        # Style Definitions
+        thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), 
+                             top=Side(style='thin'), bottom=Side(style='thin'))
+        header_fill = PatternFill(start_color="00FFFF", end_color="00FFFF", fill_type="solid")
+        title_fill = PatternFill(start_color="CC9900", end_color="CC9900", fill_type="solid")
+        bbm_fill = PatternFill(start_color="00FF00", end_color="00FF00", fill_type="solid") # Hijau
+        parkir_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid") # Kuning
+        total_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+
         list_excel = sorted(
             [k for k in df_raw['Kelompok_Sheet'].unique() if k != ""],
             key=lambda x: (int(x.split(' ')[-1]), list(nama_bulan_id.values()).index(x.split(' ')[0]))
         )
+
         for p in list_excel:
             ws = wb.create_sheet(title=p[:31])
+            
+            # 1. Judul Header Atas
             ws.merge_cells('B2:I3')
-            ws['B2'] = "APLIKASI BIOS (BIAYA OPERASIONAL)"; ws['B2'].font = Font(bold=True, color="FFFFFF", size=14)
+            ws['B2'] = "APLIKASI BIOS (BIAYA OPERASIONAL)"
+            ws['B2'].font = Font(bold=True, color="FFFFFF", size=14)
             ws['B2'].alignment = Alignment(horizontal="center", vertical="center")
-            ws['B2'].fill = PatternFill(start_color="CC9900", end_color="CC9900", fill_type="solid")
-            ws.append([]); ws.append(["No", "URAIAN", "NAMA VENDOR", "POS", "GL", "TANGGAL", "JUMLAH", "NET"])
+            ws['B2'].fill = title_fill
+
+            # 2. Header Tabel (Sesuai Gambar 2)
+            headers = ["No", "URAIAN", "NAMA VENDOR", "POS MATA ANGGARAN", "GL ACCOUNT", 
+                       "TANGGAL TRANSAKSI (SESUAI NOTA)", "JUMLAH PENGGUNAAN", "SETELAH PPN", "PPN"]
+            ws.append([]) # Baris kosong pembatas
+            ws.append([]) # Baris kosong pembatas
+            ws.append(headers)
+            header_row = 6 # Header ada di baris ke-6
+
+            for col_num, cell_val in enumerate(headers, 1):
+                cell = ws.cell(row=header_row, column=col_num)
+                cell.fill = header_fill
+                cell.font = Font(bold=True, size=10)
+                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                cell.border = thin_border
+
+            # 3. Data Baris
             df_b = df_raw[df_raw['Kelompok_Sheet'] == p]
+            current_row = header_row + 1
+            
             for i, r in enumerate(df_b.itertuples(), 1):
-                t = "" if r.uraian == "Karcis Parkir Kendaraan Operasional" else str(r.tanggal)
-                ws.append([i, f"{i} {r.uraian}", r.vendor, "", "", t, r.jumlah, r.jumlah])
+                tgl = "" if r.uraian == "Karcis Parkir Kendaraan Operasional" else str(r.tanggal)
+                row_data = [i, f"{i} {r.uraian}", r.vendor, "", "", tgl, r.jumlah, r.jumlah, ""]
+                ws.append(row_data)
+                
+                # Tentukan Warna berdasarkan Uraian
+                current_fill = None
+                if "Isi BBM" in r.uraian:
+                    current_fill = bbm_fill
+                elif "Karcis Parkir" in r.uraian:
+                    current_fill = parkir_fill
+                
+                # Apply Style ke setiap cell dalam baris
+                for col_idx in range(1, 10):
+                    cell = ws.cell(row=current_row, column=col_idx)
+                    cell.border = thin_border
+                    cell.alignment = Alignment(vertical="center")
+                    if current_fill:
+                        cell.fill = current_fill
+                    
+                    # Format Angka untuk kolom Jumlah & Setelah PPN
+                    if col_idx in [7, 8]:
+                        cell.number_format = '#,##0'
+                
+                current_row += 1
+
+            # 4. Baris Total (Paling Bawah)
+            ws.append(["", "TOTAL", "", "", "", "", f"=SUM(G{header_row+1}:G{current_row-1})", f"=SUM(H{header_row+1}:H{current_row-1})", ""])
+            for col_idx in range(1, 10):
+                cell = ws.cell(row=current_row, column=col_idx)
+                cell.font = Font(bold=True)
+                cell.fill = total_fill
+                cell.border = thin_border
+                if col_idx in [7, 8]:
+                    cell.number_format = '#,##0'
+
+            # Setting Lebar Kolom
+            ws.column_dimensions['A'].width = 5
+            ws.column_dimensions['B'].width = 40
+            ws.column_dimensions['C'].width = 25
+            ws.column_dimensions['F'].width = 18
+            ws.column_dimensions['G'].width = 15
+            ws.column_dimensions['H'].width = 15
+
         buf = BytesIO(); wb.save(buf)
-        st.sidebar.download_button("⬇️ Download Excel", buf.getvalue(), "Rekap_BIOS.xlsx")
+        st.sidebar.download_button("⬇️ Download Excel BIOS", buf.getvalue(), f"Rekap_BIOS_{datetime.date.today()}.xlsx")
 
 st.sidebar.divider()
 st.sidebar.markdown("### Hapus Keseluruhan Data")
