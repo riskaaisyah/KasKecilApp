@@ -81,7 +81,7 @@ if submit:
     else:
         st.warning("Mohon isi Nama Vendor dan Jumlah nominal!")
 
-# --- 6. REKAPITULASI & BATCHING ---
+# --- 6. REKAPITULASI ---
 st.divider()
 df_raw = fetch_data()
 nama_bulan_id = {1:"JANUARI", 2:"FEBRUARI", 3:"MARET", 4:"APRIL", 5:"MEI", 6: "JUNI", 7: "JULI", 8: "AGUSTUS", 9: "SEPTEMBER", 10: "OKTOBER", 11: "NOVEMBER", 12: "DESEMBER"}
@@ -116,15 +116,8 @@ if not df_raw.empty:
             df_edit.columns = ['id', 'No', 'Uraian', 'Vendor', 'Tanggal', 'Jumlah']
             
             edited = st.data_editor(
-                df_edit, 
-                key=f"ed_{g}", 
-                num_rows="dynamic",
-                use_container_width=True,
-                column_config={
-                    "id": None, 
-                    "No": st.column_config.NumberColumn(disabled=True), 
-                    "Jumlah": st.column_config.NumberColumn(format="Rp %d") 
-                }
+                df_edit, key=f"ed_{g}", num_rows="dynamic", use_container_width=True,
+                column_config={"id": None, "No": st.column_config.NumberColumn(disabled=True), "Jumlah": st.column_config.NumberColumn(format="Rp %d")}
             )
 
             if st.button(f"💾 Simpan Perubahan {g}", key=f"btn_{g}"):
@@ -138,7 +131,7 @@ if not df_raw.empty:
                     st.success("Berhasil Update!"); time.sleep(1); st.rerun()
                 except Exception as e: st.error(f"Gagal: {e}")
 
-# --- 7. SIDEBAR & DOWNLOAD EXCEL (FIX MENYATU & NAMA FILE OTOMATIS) ---
+# --- 7. SIDEBAR & DOWNLOAD EXCEL (FIX 100% SESUAI GAMBAR 2) ---
 st.sidebar.markdown("### 💾 Simpan Rekap Kas Kecil")
 if not df_raw.empty:
     all_kelompok = sorted([k for k in df_raw['Kelompok_Sheet'].unique() if k != ""], 
@@ -149,82 +142,82 @@ if not df_raw.empty:
         thin = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
         h_fill = PatternFill(start_color="00FFFF", end_color="00FFFF", fill_type="solid")
         summary_fill = PatternFill(start_color="99CCFF", end_color="99CCFF", fill_type="solid")
+        title_fill = PatternFill(start_color="CC9900", end_color="CC9900", fill_type="solid")
         
         for p in grp_sel:
             ws = wb.create_sheet(title=p[:31])
-            ws.merge_cells('B2:I3')
-            ws['B2'] = "APLIKASI BIOS (BIAYA OPERASIONAL)"
-            ws['B2'].font = Font(bold=True, color="FFFFFF", size=14)
-            ws['B2'].alignment = Alignment(horizontal="center", vertical="center")
-            ws['B2'].fill = PatternFill(start_color="CC9900", end_color="CC9900", fill_type="solid")
             
-            headers = ["No", "URAIAN", "NAMA VENDOR", "POS MATA ANGGARAN", "GL ACCOUNT", "TANGGAL TRANSAKSI", "JUMLAH PENGGUNAAN", "SETELAH PPN", "PPN"]
-            ws.append([]); ws.append([]); ws.append(headers) 
+            # 1. Judul Panjang (Merger A2 ke L3)
+            ws.merge_cells('A2:L3')
+            ws['A2'] = "APLIKASI BIOS (BIAYA OPERASIONAL)"
+            ws['A2'].font = Font(bold=True, color="FFFFFF", size=14)
+            ws['A2'].alignment = Alignment(horizontal="center", vertical="center")
+            ws['A2'].fill = title_fill
+            
+            # 2. Header Tabel Lengkap (Kolom A s/d L)
+            headers = ["No", "URAIAN", "NAMA VENDOR", "POS MATA ANGGARAN", "GL ACCOUNT", 
+                       "TANGGAL TRANSAKSI (SESUAI NOTA)", "JUMLAH PENGGUNAAN", "SETELAH PPN", 
+                       "PPN", "PPH 23", "TOTAL"]
+            
+            ws.append([]); ws.append([]); ws.append(headers) # Baris 5
             for col_num, val in enumerate(headers, 1):
                 cell = ws.cell(row=5, column=col_num)
-                cell.fill = h_fill; cell.font = Font(bold=True); cell.border = thin; cell.alignment = Alignment(horizontal="center")
+                cell.fill = h_fill; cell.font = Font(bold=True); cell.border = thin; 
+                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
             
             df_b = df_sel[df_sel['Kelompok_Sheet'] == p]
             curr_r = 6
             for i, r in enumerate(df_b.itertuples(), 1):
                 t = "" if r.uraian == "Karcis Parkir Kendaraan Operasional" else pd.to_datetime(r.tanggal).strftime('%d/%m/%Y')
-                ws.append([i, f"{i} {r.uraian}", r.vendor, "", "", t, r.jumlah, r.jumlah, ""])
-                for col_idx in range(1, 10):
+                # Isi baris data (Lengkap sampai kolom TOTAL)
+                ws.append([i, f"{i} {r.uraian}", r.vendor, "", "", t, r.jumlah, r.jumlah, "", "", r.jumlah])
+                
+                for col_idx in range(1, 12):
                     cell = ws.cell(row=curr_r, column=col_idx)
                     cell.border = thin
                     if "Isi BBM" in r.uraian: cell.fill = PatternFill(start_color="00FF00", end_color="00FF00", fill_type="solid")
                     if "Karcis Parkir" in r.uraian: cell.fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
-                    if col_idx in [7, 8]: cell.number_format = '#,##0'
+                    if col_idx in [7, 8, 11]: cell.number_format = '#,##0'
                 curr_r += 1
             
-            # --- BAGIAN RINGKASAN SISA (MENYATU TANPA BARIS TOTAL LAMA) ---
-            # PENGAJUAN
-            ws.merge_cells(start_row=curr_r, start_column=1, end_row=curr_r, end_column=7)
-            ws.cell(row=curr_r, column=1).value = "PENGAJUAN UANG MUKA"
-            ws.cell(row=curr_r, column=1).alignment = Alignment(horizontal="right")
-            ws.cell(row=curr_r, column=8).value = LIMIT_KAS
+            # 3. Ringkasan Biru (Tanpa Baris Total Tengah)
+            labels = [("PENGAJUAN UANG MUKA", LIMIT_KAS), 
+                      ("PENGGUNAAN UANG MUKA", f"=SUM(G6:G{curr_r-1})"), 
+                      ("SISA UANG MUKA", f"=K{curr_r}-K{curr_r+1}")]
             
-            # PENGGUNAAN
-            ws.merge_cells(start_row=curr_r+1, start_column=1, end_row=curr_r+1, end_column=7)
-            ws.cell(row=curr_r+1, column=1).value = "PENGGUNAAN UANG MUKA"
-            ws.cell(row=curr_r+1, column=1).alignment = Alignment(horizontal="right")
-            ws.cell(row=curr_r+1, column=8).value = f"=SUM(G6:G{curr_r-1})"
-            
-            # SISA
-            ws.merge_cells(start_row=curr_r+2, start_column=1, end_row=curr_r+2, end_column=7)
-            ws.cell(row=curr_r+2, column=1).value = "SISA UANG MUKA"
-            ws.cell(row=curr_r+2, column=1).alignment = Alignment(horizontal="right")
-            ws.cell(row=curr_r+2, column=8).value = f"=H{curr_r}-H{curr_r+1}"
-            
-            # Styling Ringkasan
-            for r_idx in range(curr_r, curr_r+3):
-                for c_idx in range(1, 9):
-                    cell = ws.cell(row=r_idx, column=c_idx)
-                    cell.fill = summary_fill; cell.font = Font(bold=True); cell.border = thin
-                    if c_idx == 8: cell.number_format = '#,##0'
+            for offset, (lab, val) in enumerate(labels):
+                row_idx = curr_r + offset
+                ws.merge_cells(start_row=row_idx, start_column=1, end_row=row_idx, end_column=10)
+                ws.cell(row=row_idx, column=1).value = lab
+                ws.cell(row=row_idx, column=1).alignment = Alignment(horizontal="right")
+                
+                target_cell = ws.cell(row=row_idx, column=11)
+                target_cell.value = val
+                
+                # Style Biru Lengkap A s/d L
+                for col_idx in range(1, 12):
+                    c = ws.cell(row=row_idx, column=col_idx)
+                    c.fill = summary_fill; c.font = Font(bold=True); c.border = thin
+                    if col_idx == 11: c.number_format = '#,##0'
 
-            ws.column_dimensions['B'].width = 45; ws.column_dimensions['F'].width = 20
+            ws.column_dimensions['B'].width = 45; ws.column_dimensions['F'].width = 25
+            ws.column_dimensions['G'].width = 15; ws.column_dimensions['K'].width = 15
+            
         buf = BytesIO(); wb.save(buf); return buf.getvalue()
 
-    # DOWNLOAD SEMUA
+    # Logika Nama File Otomatis
     if st.sidebar.button("💾 Siapkan Excel (Semua)"):
         nama_file_all = f"Rekap Kas Kecil 2026 {all_kelompok[-1]}.xlsx"
         st.sidebar.download_button("⬇️ Download Semua", buat_excel(df_raw, all_kelompok), nama_file_all)
     
     st.sidebar.divider()
-    
-    # DOWNLOAD PER TABEL (NAMA FILE OTOMATIS)
     tabel_pil = st.sidebar.selectbox("Pilih Tabel:", all_kelompok)
     if st.sidebar.button(f"💾 Siapkan Excel {tabel_pil}"):
         nama_file_single = f"Rekap Kas Kecil 2026 {tabel_pil}.xlsx"
         st.sidebar.download_button(f"⬇️ Download {tabel_pil}", buat_excel(df_raw, [tabel_pil]), nama_file_single)
 
 st.sidebar.divider()
-st.sidebar.markdown("### 🗑️ Hapus Keseluruhan Data")
 konf = st.sidebar.checkbox("Yakin hapus SEMUA?")
 if st.sidebar.button("🗑️ Kosongkan Data", type="primary", disabled=not konf):
     conn.table("kas_kecil").delete().neq("id", 0).execute()
     st.rerun()
-
-if 'df_raw' not in locals() or df_raw.empty:
-    st.info("Belum ada data di Cloud Database.")
