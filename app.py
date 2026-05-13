@@ -44,7 +44,6 @@ with st.form("form_kas", clear_on_submit=True):
 if submit:
     if vendor.strip() != "" and jumlah is not None and jumlah > 0:
         try:
-            # Kita langsung masukkan saja, batching akan diatur secara dinamis saat penampilan & export
             target_uraian = "Karcis Parkir Kendaraan Operasional"
             if uraian_pilih == target_uraian:
                 bln, thn = tanggal_input.month, tanggal_input.year
@@ -64,47 +63,32 @@ if submit:
                     conn.table("kas_kecil").insert({"uraian": target_uraian, "vendor": vendor, "tanggal": str(tanggal_input), "jumlah": int(jumlah)}).execute()
             else:
                 conn.table("kas_kecil").insert({"uraian": uraian_pilih, "vendor": vendor, "tanggal": str(tanggal_input), "jumlah": int(jumlah)}).execute()
-            
-            st.success("Data Berhasil Disimpan!")
-            time.sleep(0.5); st.rerun()
+            st.success("Data Berhasil Disimpan!"); time.sleep(0.5); st.rerun()
         except Exception as e: st.error(f"Gagal: {e}")
     else:
         st.warning("Mohon isi Nama Vendor dan Jumlah!")
 
-# --- 6. REKAPITULASI (LOGIKA AUTO-FILL GAP) ---
+# --- 6. REKAPITULASI (AUTO-FILL GAP) ---
 st.divider()
 df_raw = fetch_data()
 nama_bulan_id = {1:"JANUARI", 2:"FEBRUARI", 3:"MARET", 4:"APRIL", 5:"MEI", 6: "JUNI", 7: "JULI", 8: "AGUSTUS", 9: "SEPTEMBER", 10: "OKTOBER", 11: "NOVEMBER", 12: "DESEMBER"}
-
-LIMIT_KAS = 25_000_000
+LIMIT_KAS = 25000000
 
 if not df_raw.empty:
     df_raw['tanggal_dt'] = pd.to_datetime(df_raw['tanggal'], errors='coerce')
     df_raw['Kelompok_Sheet'] = ""
-    
-    # Kelompokkan per bulan-tahun
     for (y, m), group in df_raw.groupby([df_raw['tanggal_dt'].dt.year, df_raw['tanggal_dt'].dt.month]):
         if pd.isna(m): continue
-        
-        # Penampung total per batch untuk bulan tersebut
         batch_totals = {1: 0}
-        
-        # Urutkan berdasarkan ID (urutan input) agar konsisten
         for idx, row in group.sort_values('id').iterrows():
-            assigned = False
-            b_idx = 1
-            
-            # Cari batch yang masih muat (dimulai dari batch 1)
+            assigned = False; b_idx = 1
             while not assigned:
-                if b_idx not in batch_totals:
-                    batch_totals[b_idx] = 0
-                
+                if b_idx not in batch_totals: batch_totals[b_idx] = 0
                 if batch_totals[b_idx] + row['jumlah'] <= LIMIT_KAS:
                     batch_totals[b_idx] += row['jumlah']
                     df_raw.at[idx, 'Kelompok_Sheet'] = f"{nama_bulan_id[int(m)]} ({b_idx}) {int(y)}"
                     assigned = True
-                else:
-                    b_idx += 1 # Coba batch berikutnya kalau tidak muat
+                else: b_idx += 1
 
     list_kelompok = sorted([k for k in df_raw['Kelompok_Sheet'].unique() if k != ""], 
                            key=lambda x: (int(x.split(' ')[-1]), list(nama_bulan_id.values()).index(x.split(' ')[0])), reverse=True)
@@ -119,10 +103,8 @@ if not df_raw.empty:
             df_disp['Tgl_View'] = df_disp.apply(lambda x: "" if x['uraian'] == "Karcis Parkir Kendaraan Operasional" else x['tanggal'], axis=1)
             df_edit = df_disp[['id', 'No', 'Uraian_View', 'vendor', 'Tgl_View', 'jumlah']].copy()
             df_edit.columns = ['id', 'No', 'Uraian', 'Vendor', 'Tanggal', 'Jumlah']
-            
             edited = st.data_editor(df_edit, key=f"ed_{g}", num_rows="dynamic", use_container_width=True,
                                     column_config={"id": None, "No": st.column_config.NumberColumn(disabled=True), "Jumlah": st.column_config.NumberColumn(format="Rp %d")})
-
             if st.button(f"💾 Simpan Perubahan {g}", key=f"btn_{g}"):
                 try:
                     ids_old = set(df_edit['id'].tolist()); ids_new = set(edited['id'].dropna().astype(int).tolist())
@@ -134,7 +116,7 @@ if not df_raw.empty:
                     st.success("Berhasil!"); time.sleep(1); st.rerun()
                 except Exception as e: st.error(f"Gagal: {e}")
 
-# --- 7. SIDEBAR & DOWNLOAD EXCEL (DENGAN LOGIKA TOTAL BIRU) ---
+# --- 7. SIDEBAR & DOWNLOAD EXCEL (DENGAN FIX LEBAR KOLOM) ---
 st.sidebar.markdown("### 💾 Simpan Rekap Kas Kecil")
 if not df_raw.empty:
     all_kelompok = sorted([k for k in df_raw['Kelompok_Sheet'].unique() if k != ""], 
@@ -169,8 +151,8 @@ if not df_raw.empty:
                 curr_r += 1
             
             # TOTAL BIRU
-            ws.cell(row=curr_r, column=2).value = "TOTAL"; ws.cell(row=curr_r, column=2).font = Font(bold=True)
-            ws.cell(row=curr_r, column=7).value = f"=SUM(G6:G{curr_r-1})"; ws.cell(row=curr_r, column=12).value = f"=SUM(L6:L{curr_r-1})"
+            ws.cell(row=curr_r, column=1).border = thin; ws.cell(row=curr_r, column=2).value = "TOTAL"; ws.cell(row=curr_r, column=2).font = Font(bold=True)
+            ws.cell(row=curr_r, column=7).value = f"=SUM(G6:G{curr_r-1})"; ws.cell(row=curr_r, column=8).value = f"=SUM(H6:H{curr_r-1})"; ws.cell(row=curr_r, column=12).value = f"=SUM(L6:L{curr_r-1})"
             for col_idx in range(1, 13):
                 cell = ws.cell(row=curr_r, column=col_idx); cell.fill = summary_fill; cell.font = Font(bold=True); cell.border = thin
                 if col_idx in [7, 8, 12]: cell.number_format = '#,##0'
@@ -186,7 +168,21 @@ if not df_raw.empty:
                 for col_idx in range(1, 13):
                     c = ws.cell(row=row_idx, column=col_idx); c.fill = summary_fill; c.font = Font(bold=True); c.border = thin
                     if col_idx == 12: c.number_format = '#,##0'
-            ws.column_dimensions['B'].width = 45; ws.column_dimensions['F'].width = 25
+
+            # FIX: LEBAR KOLOM OTOMATIS BIAR GAK MUNCUL #######
+            ws.column_dimensions['A'].width = 5
+            ws.column_dimensions['B'].width = 45 # Uraian
+            ws.column_dimensions['C'].width = 20 # Vendor
+            ws.column_dimensions['D'].width = 15 # Pos
+            ws.column_dimensions['E'].width = 15 # GL
+            ws.column_dimensions['F'].width = 25 # Tanggal
+            ws.column_dimensions['G'].width = 18 # Jumlah Penggunaan
+            ws.column_dimensions['H'].width = 18 # Setelah PPN
+            ws.column_dimensions['I'].width = 12 # PPN
+            ws.column_dimensions['J'].width = 12 # PPH 23
+            ws.column_dimensions['K'].width = 12 # PPH 4(2)
+            ws.column_dimensions['L'].width = 18 # TOTAL
+            
         buf = BytesIO(); wb.save(buf); return buf.getvalue()
 
     if st.sidebar.button("💾 Siapkan Excel (Semua)"):
