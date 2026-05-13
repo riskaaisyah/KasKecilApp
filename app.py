@@ -147,19 +147,19 @@ if not df_raw.empty:
         for p in grp_sel:
             ws = wb.create_sheet(title=p[:31])
             
-            # 1. Judul Panjang (Merger A2 ke L3)
+            # Judul Panjang (Merger A2 ke L3)
             ws.merge_cells('A2:L3')
             ws['A2'] = "APLIKASI BIOS (BIAYA OPERASIONAL)"
             ws['A2'].font = Font(bold=True, color="FFFFFF", size=14)
             ws['A2'].alignment = Alignment(horizontal="center", vertical="center")
             ws['A2'].fill = title_fill
             
-            # 2. Header Tabel Lengkap (Kolom A s/d L)
+            # Header Tabel Lengkap (Kolom A s/d L)
             headers = ["No", "URAIAN", "NAMA VENDOR", "POS MATA ANGGARAN", "GL ACCOUNT", 
                        "TANGGAL TRANSAKSI (SESUAI NOTA)", "JUMLAH PENGGUNAAN", "SETELAH PPN", 
                        "PPN", "PPH 23", "TOTAL"]
             
-            ws.append([]); ws.append([]); ws.append(headers) # Baris 5
+            ws.append([]); ws.append([]); ws.append(headers) 
             for col_num, val in enumerate(headers, 1):
                 cell = ws.cell(row=5, column=col_num)
                 cell.fill = h_fill; cell.font = Font(bold=True); cell.border = thin; 
@@ -169,7 +169,6 @@ if not df_raw.empty:
             curr_r = 6
             for i, r in enumerate(df_b.itertuples(), 1):
                 t = "" if r.uraian == "Karcis Parkir Kendaraan Operasional" else pd.to_datetime(r.tanggal).strftime('%d/%m/%Y')
-                # Isi baris data (Lengkap sampai kolom TOTAL)
                 ws.append([i, f"{i} {r.uraian}", r.vendor, "", "", t, r.jumlah, r.jumlah, "", "", r.jumlah])
                 
                 for col_idx in range(1, 12):
@@ -180,9 +179,26 @@ if not df_raw.empty:
                     if col_idx in [7, 8, 11]: cell.number_format = '#,##0'
                 curr_r += 1
             
-            # 3. Ringkasan Biru (Tanpa Baris Total Tengah)
+            # --- BARIS TOTAL BIRU (SESUAI GAMBAR 2) ---
+            ws.cell(row=curr_r, column=1).border = thin
+            ws.cell(row=curr_r, column=2).value = "TOTAL"
+            ws.cell(row=curr_r, column=2).font = Font(bold=True)
+            
+            # Rumus Sum untuk baris total biru
+            ws.cell(row=curr_r, column=7).value = f"=SUM(G6:G{curr_r-1})"
+            ws.cell(row=curr_r, column=8).value = f"=SUM(H6:H{curr_r-1})"
+            ws.cell(row=curr_r, column=11).value = f"=SUM(K6:K{curr_r-1})"
+            
+            for col_idx in range(1, 12):
+                cell = ws.cell(row=curr_r, column=col_idx)
+                cell.fill = summary_fill; cell.font = Font(bold=True); cell.border = thin
+                if col_idx in [7, 8, 11]: cell.number_format = '#,##0'
+            
+            curr_r += 1 # Pindah ke baris setelah Total Biru
+            
+            # --- BAGIAN RINGKASAN SISA (PENGGUNAAN, DLL) ---
             labels = [("PENGAJUAN UANG MUKA", LIMIT_KAS), 
-                      ("PENGGUNAAN UANG MUKA", f"=SUM(G6:G{curr_r-1})"), 
+                      ("PENGGUNAAN UANG MUKA", f"=K{curr_r-1}"), # Ambil dari Nilai TOTAL di kolom K
                       ("SISA UANG MUKA", f"=K{curr_r}-K{curr_r+1}")]
             
             for offset, (lab, val) in enumerate(labels):
@@ -194,7 +210,6 @@ if not df_raw.empty:
                 target_cell = ws.cell(row=row_idx, column=11)
                 target_cell.value = val
                 
-                # Style Biru Lengkap A s/d L
                 for col_idx in range(1, 12):
                     c = ws.cell(row=row_idx, column=col_idx)
                     c.fill = summary_fill; c.font = Font(bold=True); c.border = thin
@@ -205,7 +220,6 @@ if not df_raw.empty:
             
         buf = BytesIO(); wb.save(buf); return buf.getvalue()
 
-    # Logika Nama File Otomatis
     if st.sidebar.button("💾 Siapkan Excel (Semua)"):
         nama_file_all = f"Rekap Kas Kecil 2026 {all_kelompok[-1]}.xlsx"
         st.sidebar.download_button("⬇️ Download Semua", buat_excel(df_raw, all_kelompok), nama_file_all)
