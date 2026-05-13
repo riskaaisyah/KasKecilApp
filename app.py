@@ -26,79 +26,14 @@ def fetch_data():
     except Exception:
         return pd.DataFrame(columns=["id", "uraian", "vendor", "tanggal", "jumlah"])
 
-# --- FUNGSI GENERATE EXCEL ---
-def generate_excel(df_to_export, kelompok_names, nama_bulan_id):
-    wb = Workbook()
-    del wb['Sheet']
-    
-    thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), 
-                         top=Side(style='thin'), bottom=Side(style='thin'))
-    header_fill = PatternFill(start_color="00FFFF", end_color="00FFFF", fill_type="solid")
-    title_fill = PatternFill(start_color="CC9900", end_color="CC9900", fill_type="solid")
-    bbm_fill = PatternFill(start_color="00FF00", end_color="00FF00", fill_type="solid")
-    parkir_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
-    total_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+opsi_uraian = [
+    "Jamuan Makan Dinas", 
+    "Kebutuhan Kantor", 
+    "Karcis Parkir Kendaraan Operasional", 
+    "Isi BBM Kendaraan Operasional"
+]
 
-    sorted_groups = sorted(
-        kelompok_names,
-        key=lambda x: (int(x.split(' ')[-1]), list(nama_bulan_id.values()).index(x.split(' ')[0]))
-    )
-
-    for p in sorted_groups:
-        ws = wb.create_sheet(title=p[:31])
-        ws.merge_cells('B2:I3')
-        ws['B2'] = "APLIKASI BIOS (BIAYA OPERASIONAL)"
-        ws['B2'].font = Font(bold=True, color="FFFFFF", size=14)
-        ws['B2'].alignment = Alignment(horizontal="center", vertical="center")
-        ws['B2'].fill = title_fill
-
-        headers = ["No", "URAIAN", "NAMA VENDOR", "POS MATA ANGGARAN", "GL ACCOUNT", 
-                   "TANGGAL TRANSAKSI", "JUMLAH PENGGUNAAN", "SETELAH PPN", "PPN"]
-        
-        header_row = 5
-        for col_num, cell_val in enumerate(headers, 1):
-            cell = ws.cell(row=header_row, column=col_num)
-            cell.value = cell_val
-            cell.fill = header_fill
-            cell.font = Font(bold=True, size=10)
-            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-            cell.border = thin_border
-
-        df_b = df_to_export[df_to_export['Kelompok_Sheet'] == p]
-        current_row = header_row + 1
-        for i, r in enumerate(df_b.itertuples(), 1):
-            tgl = "" if r.uraian == "Karcis Parkir Kendaraan Operasional" else pd.to_datetime(r.tanggal).strftime('%d/%m/%Y')
-            row_data = [i, f"{i} {r.uraian}", r.vendor, "", "", tgl, r.jumlah, r.jumlah, ""]
-            ws.append(row_data)
-            
-            fill = bbm_fill if "Isi BBM" in r.uraian else (parkir_fill if "Karcis Parkir" in r.uraian else None)
-            for col_idx in range(1, 10):
-                cell = ws.cell(row=current_row, column=col_idx)
-                cell.border = thin_border
-                cell.alignment = Alignment(vertical="center", horizontal="left" if col_idx <= 3 else "center")
-                if fill: cell.fill = fill
-                if col_idx in [7, 8]: cell.number_format = '#,##0'
-            current_row += 1
-
-        ws.cell(row=current_row, column=2).value = "TOTAL"
-        ws.cell(row=current_row, column=2).font = Font(bold=True)
-        ws.cell(row=current_row, column=7).value = f"=SUM(G{header_row+1}:G{current_row-1})"
-        ws.cell(row=current_row, column=8).value = f"=SUM(H{header_row+1}:H{current_row-1})"
-        for col_idx in range(1, 10):
-            cell = ws.cell(row=current_row, column=col_idx)
-            cell.font = Font(bold=True); cell.fill = total_fill; cell.border = thin_border
-            if col_idx in [7, 8]: cell.number_format = '#,##0'
-
-        ws.column_dimensions['B'].width = 45
-        ws.column_dimensions['F'].width = 20
-    
-    buf = BytesIO()
-    wb.save(buf)
-    return buf.getvalue()
-
-# --- 4. FORM INPUT (OPTIMAL UNTUK TOMBOL ENTER) ---
-opsi_uraian = ["Jamuan Makan Dinas", "Kebutuhan Kantor", "Karcis Parkir Kendaraan Operasional", "Isi BBM Kendaraan Operasional"]
-
+# --- 4. FORM INPUT (NO ZERO & SUPPORT ENTER) ---
 with st.form("form_kas", clear_on_submit=True):
     st.subheader("Input Data Transaksi")
     col1, col2 = st.columns(2)
@@ -107,15 +42,21 @@ with st.form("form_kas", clear_on_submit=True):
         vendor = st.text_input("Nama Vendor", placeholder="Ketik vendor lalu tekan Tab...")
     with col2:
         tanggal_input = st.date_input("Tanggal", value=datetime.date.today())
-        # Set value=0 agar tidak 'None'. Tekan Enter di sini akan langsung submit.
-        jumlah = st.number_input("Jumlah (Nominal)", min_value=0, step=1000, value=0)
+        # KEMBALI KE value=None agar tidak ada angka 0 yang mengganggu
+        jumlah = st.number_input(
+            "Jumlah (Nominal)", 
+            min_value=0, 
+            step=1000, 
+            value=None, 
+            placeholder="Masukkan nominal..."
+        )
     
-    # Tombol ini harus ada agar fitur 'Enter' di keyboard aktif
     submit = st.form_submit_button("Simpan ke Cloud 🚀")
 
 # --- 5. LOGIKA SIMPAN ---
 if submit:
-    if vendor.strip() != "" and jumlah > 0:
+    # Logika diperketat: Vendor tidak boleh kosong & Jumlah harus diisi (bukan None atau 0)
+    if vendor.strip() != "" and jumlah is not None and jumlah > 0:
         try:
             target_uraian = "Karcis Parkir Kendaraan Operasional"
             if uraian_pilih == target_uraian:
@@ -146,7 +87,7 @@ if submit:
         except Exception as e:
             st.error(f"Gagal: {e}")
     else:
-        st.warning("Pastikan Nama Vendor terisi dan Jumlah lebih dari 0!")
+        st.warning("Mohon isi Nama Vendor dan Jumlah nominal!")
 
 # --- 6. REKAPITULASI & BATCHING ---
 st.divider()
@@ -181,7 +122,6 @@ if not df_raw.empty:
             df_edit = df_disp[['id', 'No', 'Uraian_View', 'vendor', 'Tgl_View', 'jumlah']].copy()
             df_edit.columns = ['id', 'No', 'Uraian', 'Vendor', 'Tanggal', 'Jumlah']
             
-            # --- TAMPILAN TITIK RIBUAN ---
             edited = st.data_editor(
                 df_edit, 
                 key=f"ed_{g}", 
@@ -205,26 +145,62 @@ if not df_raw.empty:
                     st.success("Berhasil Update!"); time.sleep(1); st.rerun()
                 except Exception as e: st.error(f"Gagal: {e}")
 
-# --- 7. SIDEBAR ---
+# --- 7. SIDEBAR & DOWNLOAD EXCEL (FIX WARNA & FORMAT TANGGAL INDO) ---
 st.sidebar.markdown("### 💾 Simpan Rekap Kas Kecil")
 if not df_raw.empty:
     all_kelompok = sorted([k for k in df_raw['Kelompok_Sheet'].unique() if k != ""], 
                           key=lambda x: (int(x.split(' ')[-1]), list(nama_bulan_id.values()).index(x.split(' ')[0])))
     
-    if st.sidebar.button("💾 Siapkan Excel (Semua Tabel)"):
-        data = generate_excel(df_raw, all_kelompok, nama_bulan_id)
-        st.sidebar.download_button("⬇️ Download Semua", data, f"Rekap_Lengkap_{datetime.date.today()}.xlsx")
+    def buat_excel(df_sel, grp_sel):
+        wb = Workbook(); del wb['Sheet']
+        thin = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+        h_fill = PatternFill(start_color="00FFFF", end_color="00FFFF", fill_type="solid")
+        for p in grp_sel:
+            ws = wb.create_sheet(title=p[:31])
+            ws.merge_cells('B2:I3')
+            ws['B2'] = "APLIKASI BIOS (BIAYA OPERASIONAL)"
+            ws['B2'].font = Font(bold=True, color="FFFFFF", size=14)
+            ws['B2'].alignment = Alignment(horizontal="center", vertical="center")
+            ws['B2'].fill = PatternFill(start_color="CC9900", end_color="CC9900", fill_type="solid")
+            
+            headers = ["No", "URAIAN", "NAMA VENDOR", "POS MATA ANGGARAN", "GL ACCOUNT", "TANGGAL TRANSAKSI", "JUMLAH PENGGUNAAN", "SETELAH PPN", "PPN"]
+            ws.append([]); ws.append([]); ws.append(headers) # Baris 5
+            for col_num, val in enumerate(headers, 1):
+                cell = ws.cell(row=5, column=col_num)
+                cell.fill = h_fill; cell.font = Font(bold=True); cell.border = thin; cell.alignment = Alignment(horizontal="center")
+            
+            df_b = df_sel[df_sel['Kelompok_Sheet'] == p]
+            curr_r = 6
+            for i, r in enumerate(df_b.itertuples(), 1):
+                t = "" if r.uraian == "Karcis Parkir Kendaraan Operasional" else pd.to_datetime(r.tanggal).strftime('%d/%m/%Y')
+                ws.append([i, f"{i} {r.uraian}", r.vendor, "", "", t, r.jumlah, r.jumlah, ""])
+                for col_idx in range(1, 10):
+                    cell = ws.cell(row=curr_r, column=col_idx)
+                    cell.border = thin
+                    if "Isi BBM" in r.uraian: cell.fill = PatternFill(start_color="00FF00", end_color="00FF00", fill_type="solid")
+                    if "Karcis Parkir" in r.uraian: cell.fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+                    if col_idx in [7, 8]: cell.number_format = '#,##0'
+                curr_r += 1
+            
+            ws.cell(row=curr_r, column=2).value = "TOTAL"; ws.cell(row=curr_r, column=2).font = Font(bold=True)
+            ws.cell(row=curr_r, column=7).value = f"=SUM(G6:G{curr_r-1})"; ws.cell(row=curr_r, column=8).value = f"=SUM(H6:H{curr_r-1})"
+            for col_idx in range(1, 10):
+                cell = ws.cell(row=curr_r, column=col_idx); cell.border = thin; cell.font = Font(bold=True)
+                if col_idx in [7, 8]: cell.number_format = '#,##0'
+            ws.column_dimensions['B'].width = 45; ws.column_dimensions['F'].width = 20
+        buf = BytesIO(); wb.save(buf); return buf.getvalue()
+
+    if st.sidebar.button("💾 Siapkan Excel (Semua)"):
+        st.sidebar.download_button("⬇️ Download Semua", buat_excel(df_raw, all_kelompok), f"Rekap_Lengkap_{datetime.date.today()}.xlsx")
     
     st.sidebar.divider()
-    st.sidebar.markdown("#### Download Per Tabel")
-    pilihan_tabel = st.sidebar.selectbox("Pilih Tabel:", all_kelompok)
-    if st.sidebar.button(f"💾 Siapkan Excel {pilihan_tabel}"):
-        data_single = generate_excel(df_raw, [pilihan_tabel], nama_bulan_id)
-        st.sidebar.download_button(f"⬇️ Download {pilihan_tabel}", data_single, f"Rekap_{pilihan_tabel.replace(' ', '_')}.xlsx")
+    tabel_pil = st.sidebar.selectbox("Pilih Tabel:", all_kelompok)
+    if st.sidebar.button(f"💾 Siapkan Excel {tabel_pil}"):
+        st.sidebar.download_button(f"⬇️ Download {tabel_pil}", buat_excel(df_raw, [tabel_pil]), f"Rekap_{tabel_pil}.xlsx")
 
 st.sidebar.divider()
 st.sidebar.markdown("### 🗑️ Hapus Keseluruhan Data")
-konf = st.sidebar.checkbox("Saya Ingin Menghapus Semua Data")
+konf = st.sidebar.checkbox("Yakin hapus SEMUA?")
 if st.sidebar.button("🗑️ Kosongkan Data", type="primary", disabled=not konf):
     conn.table("kas_kecil").delete().neq("id", 0).execute()
     st.rerun()
