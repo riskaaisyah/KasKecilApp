@@ -117,7 +117,7 @@ if not df_raw.empty:
                 except Exception as e: st.error(f"Gagal: {e}")
 
 # --- 7. SIDEBAR & DOWNLOAD EXCEL (DENGAN FIX LEBAR KOLOM) ---
-st.sidebar.markdown("###Simpan Rekap Kas Kecil")
+st.sidebar.markdown("Simpan Rekap Kas Kecil")
 if not df_raw.empty:
     all_kelompok = sorted([k for k in df_raw['Kelompok_Sheet'].unique() if k != ""], 
                           key=lambda x: (int(x.split(' ')[-1]), list(nama_bulan_id.values()).index(x.split(' ')[0])))
