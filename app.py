@@ -38,7 +38,7 @@ with st.form("form_kas", clear_on_submit=True):
     with col2:
         tanggal_input = st.date_input("Tanggal", value=datetime.date.today())
         jumlah = st.number_input("Jumlah (Nominal)", min_value=0, step=1000, value=None, placeholder="Masukkan nominal...")
-    submit = st.form_submit_button("Simpan ke Cloud 🚀")
+    submit = st.form_submit_button("Simpan ke Database")
 
 # --- 5. LOGIKA SIMPAN ---
 if submit:
@@ -96,7 +96,7 @@ if not df_raw.empty:
     for g in list_kelompok:
         df_g = df_raw[df_raw['Kelompok_Sheet'] == g].copy()
         tot_g = df_g['jumlah'].sum()
-        with st.expander(f"📂 {g} | Total: Rp {tot_g:,.0f} | 💰 Sisa: Rp {LIMIT_KAS-tot_g:,.0f}".replace(",","."), expanded=True):
+        with st.expander(f" {g} | Total: Rp {tot_g:,.0f} | Sisa: Rp {LIMIT_KAS-tot_g:,.0f}".replace(",","."), expanded=True):
             df_disp = df_g.copy()
             df_disp['No'] = range(1, len(df_disp)+1)
             df_disp['Uraian_View'] = df_disp.apply(lambda x: f"{x['No']} {x['uraian']}", axis=1)
@@ -105,7 +105,7 @@ if not df_raw.empty:
             df_edit.columns = ['id', 'No', 'Uraian', 'Vendor', 'Tanggal', 'Jumlah']
             edited = st.data_editor(df_edit, key=f"ed_{g}", num_rows="dynamic", use_container_width=True,
                                     column_config={"id": None, "No": st.column_config.NumberColumn(disabled=True), "Jumlah": st.column_config.NumberColumn(format="Rp %d")})
-            if st.button(f"💾 Simpan Perubahan {g}", key=f"btn_{g}"):
+            if st.button(f"Simpan Perubahan {g}", key=f"btn_{g}"):
                 try:
                     ids_old = set(df_edit['id'].tolist()); ids_new = set(edited['id'].dropna().astype(int).tolist())
                     for d_id in (ids_old - ids_new): conn.table("kas_kecil").delete().eq("id", d_id).execute()
@@ -117,7 +117,7 @@ if not df_raw.empty:
                 except Exception as e: st.error(f"Gagal: {e}")
 
 # --- 7. SIDEBAR & DOWNLOAD EXCEL (DENGAN FIX LEBAR KOLOM) ---
-st.sidebar.markdown("### 💾 Simpan Rekap Kas Kecil")
+st.sidebar.markdown("###Simpan Rekap Kas Kecil")
 if not df_raw.empty:
     all_kelompok = sorted([k for k in df_raw['Kelompok_Sheet'].unique() if k != ""], 
                           key=lambda x: (int(x.split(' ')[-1]), list(nama_bulan_id.values()).index(x.split(' ')[0])))
@@ -185,18 +185,18 @@ if not df_raw.empty:
             
         buf = BytesIO(); wb.save(buf); return buf.getvalue()
 
-    if st.sidebar.button("💾 Siapkan Excel (Semua)"):
+    if st.sidebar.button("💾 Siapkan Excel Keseluruhan"):
         nama_file_all = f"Rekap Kas Kecil 2026 {all_kelompok[-1]}.xlsx"
-        st.sidebar.download_button("⬇️ Download Semua", buat_excel(df_raw, all_kelompok), nama_file_all)
+        st.sidebar.download_button("Download", buat_excel(df_raw, all_kelompok), nama_file_all)
     
     st.sidebar.divider()
     tabel_pil = st.sidebar.selectbox("Pilih Tabel:", all_kelompok)
     if st.sidebar.button(f"💾 Siapkan Excel {tabel_pil}"):
         nama_file_single = f"Rekap Kas Kecil 2026 {tabel_pil}.xlsx"
-        st.sidebar.download_button(f"⬇️ Download {tabel_pil}", buat_excel(df_raw, [tabel_pil]), nama_file_single)
+        st.sidebar.download_button(f"Download {tabel_pil}", buat_excel(df_raw, [tabel_pil]), nama_file_single)
 
 st.sidebar.divider()
-konf = st.sidebar.checkbox("Yakin hapus SEMUA?")
-if st.sidebar.button("🗑️ Kosongkan Data", type="primary", disabled=not konf):
+konf = st.sidebar.checkbox("Hapus Seluruh Data?")
+if st.sidebar.button("Kosongkan Data", type="primary", disabled=not konf):
     conn.table("kas_kecil").delete().neq("id", 0).execute()
     st.rerun()
