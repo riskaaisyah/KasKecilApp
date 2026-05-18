@@ -185,15 +185,15 @@ if not df_raw.empty:
             
         buf = BytesIO(); wb.save(buf); return buf.getvalue()
 
-    if st.sidebar.button("💾 Siapkan Excel Keseluruhan"):
+    if st.sidebar.button("Siapkan Excel Keseluruhan"):
         nama_file_all = f"Rekap Kas Kecil 2026 {all_kelompok[-1]}.xlsx"
-        st.sidebar.download_button("Download", buat_excel(df_raw, all_kelompok), nama_file_all)
+        st.sidebar.download_button("💾 Download", buat_excel(df_raw, all_kelompok), nama_file_all)
     
     st.sidebar.divider()
     tabel_pil = st.sidebar.selectbox("Pilih Tabel:", all_kelompok)
-    if st.sidebar.button(f"💾 Siapkan Excel {tabel_pil}"):
+    if st.sidebar.button(f"Siapkan Excel {tabel_pil}"):
         nama_file_single = f"Rekap Kas Kecil 2026 {tabel_pil}.xlsx"
-        st.sidebar.download_button(f"Download {tabel_pil}", buat_excel(df_raw, [tabel_pil]), nama_file_single)
+        st.sidebar.download_button(f"💾 Download {tabel_pil}", buat_excel(df_raw, [tabel_pil]), nama_file_single)
 
 st.sidebar.divider()
 konf = st.sidebar.checkbox("Hapus Seluruh Data?")
